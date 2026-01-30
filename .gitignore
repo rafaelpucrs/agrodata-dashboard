@@ -1,0 +1,15 @@
+# Ambiente virtual
+.venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Arquivo de secrets do Streamlit
+.streamlit/secrets.toml
+
+# Logs de acesso
+logs/
+
+# Arquivo de variáveis de ambiente
+.env
