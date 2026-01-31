@@ -384,10 +384,6 @@ with tabs[1]:
         """
     )
 
-    if os.path.exists(ARQ_IMG_PATH):
-        st.image(ARQ_IMG_PATH, caption="Diagrama ilustrativo da arquitetura (opcional).", use_container_width=True)
-    else:
-        st.caption("Imagem de arquitetura não encontrada (opcional). Para exibir: data/arquitetura_irrigacao.png")
 
 
 with tabs[2]:
@@ -410,9 +406,4 @@ with tabs[2]:
         - Regras interpretáveis para alertas e recomendações.
         - Estrutura preparada para evolução com modelos preditivos.
         """
-    )
-
-    st.write(
-        "**Nota acadêmica:** o protótipo demonstra o ciclo completo (dados → tratamento → indicadores → recomendação), "
-        "permitindo evolução do módulo de regras para IA preditiva."
     )
