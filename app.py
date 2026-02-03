@@ -40,7 +40,6 @@ def log_access_event(event: str, username: str, evaluator: str):
         f.write(row)
 
 
-
 def check_login():
     """
     Tela de login com sessão. Sem autenticação, não renderiza absolutamente nada do dashboard.
@@ -82,10 +81,8 @@ def check_login():
     return False
 
 
-
 if not check_login():
     st.stop()
-
 
 
 st.set_page_config(
@@ -99,8 +96,8 @@ APP_SUBTITLE = (
     "alertas e recomendações automatizadas de suporte à decisão."
 )
 
-DATA_CSV_PATH = os.path.join("data", "dados_irrigacao.csv")  
-ARQ_IMG_PATH = os.path.join("data", "arquitetura_irrigacao.png")  
+DATA_CSV_PATH = os.path.join("data", "dados_irrigacao.csv")
+ARQ_IMG_PATH = os.path.join("data", "arquitetura_irrigacao.png")
 
 
 # =========================================================
@@ -258,12 +255,122 @@ def recomendacao_ia(df):
     return nivel, mensagens
 
 
+# =========================================================
+# FUNÇÕES — RESULTADOS (baseline vs otimizado) + LOG CSV
+# =========================================================
+def aplicar_otimizacao_regras(df, lamina_max=9.5, chuva_min_mm=10.0):
+    """
+    Simula um cenário otimizado simples (regras explicáveis):
+    - Desliga a bomba quando chuva 24h >= chuva_min_mm OU lâmina >= lamina_max.
+    - Caso contrário, mantém o estado original.
+    """
+    df = df.copy().sort_values("timestamp")
+
+    # chuva acumulada 24h (rolling time-based)
+    df["chuva_24h"] = (
+        df.set_index("timestamp")["chuva_mm"]
+        .rolling("24h")
+        .sum()
+        .reset_index(drop=True)
+    )
+
+    cond_desliga = (df["chuva_24h"] >= chuva_min_mm) | (df["lamina_cm"] >= lamina_max)
+
+    df["bomba_otim"] = np.where(cond_desliga, 0, df["bomba_ligada"])
+    df["energia_otim_kwh"] = np.where(df["bomba_otim"] == 1, df["energia_kwh"], 0.0)
+    df["vazao_otim_m3h"] = np.where(df["bomba_otim"] == 1, df["vazao_m3h"], 0.0)
+
+    return df
+
+
+def comparar_cenarios(df, tarifa_kwh=0.95):
+    """
+    Compara Baseline (colunas originais) vs Otimizado (colunas *_otim_*).
+    """
+    energia_base = float(df["energia_kwh"].sum())
+    volume_base = float(df["vazao_m3h"].sum())
+    horas_bomba_base = int(df["bomba_ligada"].sum())
+    ef_base = (energia_base / volume_base) if volume_base > 0 else np.nan
+    custo_base = energia_base * float(tarifa_kwh)
+
+    energia_otim = float(df["energia_otim_kwh"].sum())
+    volume_otim = float(df["vazao_otim_m3h"].sum())
+    horas_bomba_otim = int(df["bomba_otim"].sum())
+    ef_otim = (energia_otim / volume_otim) if volume_otim > 0 else np.nan
+    custo_otim = energia_otim * float(tarifa_kwh)
+
+    economia_kwh = energia_base - energia_otim
+    economia_rs = custo_base - custo_otim
+    reducao_volume = volume_base - volume_otim
+
+    return {
+        "energia_base": energia_base,
+        "energia_otim": energia_otim,
+        "economia_kwh": economia_kwh,
+        "custo_base": custo_base,
+        "custo_otim": custo_otim,
+        "economia_rs": economia_rs,
+        "volume_base": volume_base,
+        "volume_otim": volume_otim,
+        "reducao_volume": reducao_volume,
+        "horas_bomba_base": horas_bomba_base,
+        "horas_bomba_otim": horas_bomba_otim,
+        "ef_base": ef_base,
+        "ef_otim": ef_otim,
+    }
+
+
+def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, chuva_min_mm: float, tarifa_kwh: float):
+    """
+    Salva uma linha de resultados baseline vs otimizado em CSV (evidência para o TCC).
+    """
+    os.makedirs("logs", exist_ok=True)
+    out_path = os.path.join("logs", "resultados_piloto.csv")
+
+    ts = datetime.now().isoformat(timespec="seconds")
+
+    row = {
+        "timestamp_execucao": ts,
+        "periodo": periodo_label,
+        "lamina_max_cm": float(lamina_max),
+        "chuva_min_24h_mm": float(chuva_min_mm),
+        "tarifa_rs_kwh": float(tarifa_kwh),
+
+        "energia_base_kwh": float(res.get("energia_base", 0.0)),
+        "energia_otim_kwh": float(res.get("energia_otim", 0.0)),
+        "economia_kwh": float(res.get("economia_kwh", 0.0)),
+
+        "custo_base_rs": float(res.get("custo_base", 0.0)),
+        "custo_otim_rs": float(res.get("custo_otim", 0.0)),
+        "economia_rs": float(res.get("economia_rs", 0.0)),
+
+        "volume_base_m3": float(res.get("volume_base", 0.0)),
+        "volume_otim_m3": float(res.get("volume_otim", 0.0)),
+        "reducao_volume_m3": float(res.get("reducao_volume", 0.0)),
+
+        "horas_bomba_base_h": int(res.get("horas_bomba_base", 0)),
+        "horas_bomba_otim_h": int(res.get("horas_bomba_otim", 0)),
+
+        "ef_base_kwh_m3": float(res.get("ef_base", np.nan)) if pd.notna(res.get("ef_base", np.nan)) else np.nan,
+        "ef_otim_kwh_m3": float(res.get("ef_otim", np.nan)) if pd.notna(res.get("ef_otim", np.nan)) else np.nan,
+    }
+
+    df_row = pd.DataFrame([row])
+
+    if not os.path.exists(out_path):
+        df_row.to_csv(out_path, index=False, encoding="utf-8")
+    else:
+        df_row.to_csv(out_path, mode="a", header=False, index=False, encoding="utf-8")
+
+    return out_path
+
+
 def bloco_contexto_tcc():
     st.markdown(
         """
-        **Contextualização (TCC):** Este dashboard demonstra a aplicação de *Business Intelligence* e *Data Science* 
-        no monitoramento da irrigação do arroz irrigado, com foco em eficiência hídrica e energética. 
-        Dados de diferentes fontes (sensores/SCADA/clima) são consolidados e transformados em indicadores (KPIs), 
+        **Contextualização (TCC):** Este dashboard demonstra a aplicação de *Business Intelligence* e *Data Science*
+        no monitoramento da irrigação do arroz irrigado, com foco em eficiência hídrica e energética.
+        Dados de diferentes fontes (sensores/SCADA/clima) são consolidados e transformados em indicadores (KPIs),
         alertas e recomendações automatizadas, apoiando a tomada de decisão do manejo.
         """
     )
@@ -314,6 +421,12 @@ periodo = st.sidebar.selectbox(
     index=2,
 )
 
+# ✅ Parâmetros da simulação (para a aba Resultados)
+st.sidebar.header("Parâmetros (simulação)")
+tarifa_kwh = st.sidebar.number_input("Tarifa de energia (R$/kWh)", min_value=0.0, value=0.95, step=0.05)
+lamina_max = st.sidebar.slider("Lâmina máxima (cm)", min_value=7.0, max_value=12.0, value=9.5, step=0.1)
+chuva_min_mm = st.sidebar.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=30.0, value=10.0, step=0.5)
+
 if periodo == "Últimas 24h":
     df_f = df[df["timestamp"] >= (max_data - pd.Timedelta(hours=24))]
 elif periodo == "Últimos 3 dias":
@@ -323,7 +436,8 @@ elif periodo == "Últimos 7 dias":
 else:
     df_f = df.copy()
 
-tabs = st.tabs(["Dashboard", "Arquitetura da Solução", "Metodologia (simulação)"])
+# ✅ Agora com 4 abas (inclui Resultados)
+tabs = st.tabs(["Dashboard", "Arquitetura da Solução", "Metodologia (simulação)", "Resultados (piloto)"])
 
 
 with tabs[0]:
@@ -384,6 +498,11 @@ with tabs[1]:
         """
     )
 
+    # (Opcional) Mostrar imagem de arquitetura, se existir
+    if os.path.exists(ARQ_IMG_PATH):
+        st.image(ARQ_IMG_PATH, caption="Arquitetura da solução (imagem)", use_container_width=True)
+    else:
+        st.caption("Imagem de arquitetura não encontrada em: data/arquitetura_irrigacao.png")
 
 
 with tabs[2]:
@@ -407,3 +526,78 @@ with tabs[2]:
         - Estrutura preparada para evolução com modelos preditivos.
         """
     )
+
+
+with tabs[3]:
+    st.subheader("Resultados (piloto) — Baseline vs Otimizado (simulação por regras)")
+    st.caption(
+        "Comparação do cenário atual (baseline) com um cenário otimizado baseado em regras interpretáveis "
+        "(ex.: adiar bombeamento após chuva relevante e evitar excesso de lâmina). "
+        "Quando houver dados reais no CSV, a comparação se aplica ao período selecionado."
+    )
+
+    # aplica otimização e compara
+    df_sim = aplicar_otimizacao_regras(df_f, lamina_max=lamina_max, chuva_min_mm=chuva_min_mm)
+    res = comparar_cenarios(df_sim, tarifa_kwh=tarifa_kwh)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Energia Base (kWh)", f"{res['energia_base']:.1f}")
+    c2.metric("Energia Otim (kWh)", f"{res['energia_otim']:.1f}")
+    c3.metric("Economia (kWh)", f"{res['economia_kwh']:.1f}")
+    c4.metric("Economia (R$)", f"{res['economia_rs']:.2f}")
+
+    st.markdown("### Eficiência e operação")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Eficiência Base (kWh/m³)", f"{(res['ef_base'] if np.isfinite(res['ef_base']) else 0):.3f}")
+    d2.metric("Eficiência Otim (kWh/m³)", f"{(res['ef_otim'] if np.isfinite(res['ef_otim']) else 0):.3f}")
+    d3.metric("Horas bomba Base", f"{res['horas_bomba_base']} h")
+    d4.metric("Horas bomba Otim", f"{res['horas_bomba_otim']} h")
+
+    st.markdown("### Redução de bombeamento (proxy de água)")
+    st.info(
+        f"Volume bombeado (Base): {res['volume_base']:.1f} m³ | "
+        f"(Otimizado): {res['volume_otim']:.1f} m³ | "
+        f"Redução estimada: {res['reducao_volume']:.1f} m³"
+    )
+
+    st.markdown("### Gráfico comparativo (energia e vazão)")
+    comp = pd.DataFrame(
+        {
+            "timestamp": df_sim["timestamp"],
+            "energia_base_kwh": df_sim["energia_kwh"],
+            "energia_otim_kwh": df_sim["energia_otim_kwh"],
+            "vazao_base_m3h": df_sim["vazao_m3h"],
+            "vazao_otim_m3h": df_sim["vazao_otim_m3h"],
+        }
+    ).set_index("timestamp")
+
+    st.line_chart(comp[["energia_base_kwh", "energia_otim_kwh"]])
+    st.line_chart(comp[["vazao_base_m3h", "vazao_otim_m3h"]])
+
+    st.markdown("### Evidência para o TCC (CSV)")
+    if st.button("Salvar resultados desta simulação"):
+        path = salvar_resultados_piloto(
+            res=res,
+            periodo_label=periodo,
+            lamina_max=lamina_max,
+            chuva_min_mm=chuva_min_mm,
+            tarifa_kwh=tarifa_kwh,
+        )
+        st.success(f"Resultados salvos em: {path}")
+
+    log_path = os.path.join("logs", "resultados_piloto.csv")
+    if os.path.exists(log_path):
+        st.caption("Histórico salvo (últimas 20 linhas):")
+        hist = pd.read_csv(log_path)
+        st.dataframe(hist.tail(20), use_container_width=True)
+
+        with open(log_path, "rb") as f:
+            st.download_button(
+                label="Baixar CSV de evidências",
+                data=f,
+                file_name="resultados_piloto.csv",
+                mime="text/csv",
+            )
+
+    with st.expander("Ver base simulada/real com colunas de otimização (amostra)"):
+        st.dataframe(df_sim.tail(80), use_container_width=True)
