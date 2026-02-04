@@ -31,13 +31,105 @@ def log_access_event(event: str, username: str, evaluator: str):
     ts = datetime.now().isoformat(timespec="seconds")
     row = f"{ts},{event},{username},{evaluator}\n"
 
-    # Cria cabeçalho se arquivo não existe
     if not os.path.exists(log_path):
         with open(log_path, "w", encoding="utf-8") as f:
             f.write("timestamp,event,user,evaluator\n")
 
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(row)
+
+
+def log_recommendation_event(
+    nivel: str,
+    mensagens: list,
+    username: str,
+    evaluator: str,
+    periodo_label: str,
+    fase: str,
+    manejo: str,
+    tipo_solo: str,
+    risco_frio: bool,
+    dias_pos_floracao: int,
+    meta: dict,
+):
+    """
+    Registra recomendações/alertas gerados pelo motor de regras em CSV.
+    Inclui mini-resumo operacional (6h/24h) e estado da bomba.
+    """
+    os.makedirs("logs", exist_ok=True)
+    log_path = os.path.join("logs", "recommendations_log.csv")
+
+    ts = datetime.now().isoformat(timespec="seconds")
+    mensagens_txt = " | ".join([str(m).replace("\n", " ").strip() for m in mensagens])
+
+    row = {
+        "timestamp": ts,
+        "nivel": nivel,
+        "mensagens": mensagens_txt,
+        "user": username,
+        "evaluator": evaluator,
+        "periodo": periodo_label,
+        "fase": fase,
+        "manejo": manejo,
+        "tipo_solo": tipo_solo,
+        "risco_frio": int(bool(risco_frio)),
+        "dias_pos_floracao": int(dias_pos_floracao),
+
+        # estado atual
+        "bomba_atual": int(meta.get("bomba_atual", 0)),
+        "lamina_atual_cm": float(meta.get("lamina_atual", np.nan)),
+        "chuva_24h_mm": float(meta.get("chuva_24h", 0.0)),
+
+        # mini-resumo 6h
+        "bomba_horas_6h": int(meta.get("bomba_horas_6h", 0)),
+        "energia_6h_kwh": float(meta.get("energia_6h", 0.0)),
+        "volume_6h_m3": float(meta.get("volume_6h", 0.0)),
+        "ef_6h_kwh_m3": float(meta.get("eficiencia_6h", np.nan)) if meta.get("eficiencia_6h") is not None else np.nan,
+
+        # mini-resumo 24h
+        "bomba_horas_24h": int(meta.get("bomba_horas_24h", 0)),
+        "energia_24h_kwh": float(meta.get("energia_24h", 0.0)),
+        "volume_24h_m3": float(meta.get("volume_24h", 0.0)),
+        "ef_24h_kwh_m3": float(meta.get("eficiencia_24h", np.nan)) if meta.get("eficiencia_24h") is not None else np.nan,
+
+        # variação de lâmina em 24h
+        "lamina_min_24h_cm": float(meta.get("lamina_min_24h", np.nan)),
+        "lamina_max_24h_cm": float(meta.get("lamina_max_24h", np.nan)),
+
+        # baseline eficiência
+        "baseline_ef_kwh_m3": float(meta.get("baseline_ef", np.nan)) if meta.get("baseline_ef") is not None else np.nan,
+    }
+
+    df_row = pd.DataFrame([row])
+
+    if not os.path.exists(log_path):
+        df_row.to_csv(log_path, index=False, encoding="utf-8")
+    else:
+        df_row.to_csv(log_path, mode="a", header=False, index=False, encoding="utf-8")
+
+    return log_path
+
+
+def clear_logs():
+    """
+    Remove logs CSV e limpa flags de sessão associadas.
+    """
+    os.makedirs("logs", exist_ok=True)
+    rec_log_path = os.path.join("logs", "recommendations_log.csv")
+    res_log_path = os.path.join("logs", "resultados_piloto.csv")
+
+    removed = []
+    for p in [rec_log_path, res_log_path]:
+        if os.path.exists(p):
+            os.remove(p)
+            removed.append(os.path.basename(p))
+
+    # limpa flags de sessão para permitir novo registro limpo
+    for k in list(st.session_state.keys()):
+        if str(k).startswith("log_rec::"):
+            st.session_state.pop(k, None)
+
+    return removed
 
 
 def check_login():
@@ -68,7 +160,6 @@ def check_login():
             st.session_state["login_user"] = user_ok
             st.session_state["evaluator_name"] = evaluator
 
-            # logar apenas 1x por sessão de login
             if not st.session_state.get("logged_access", False):
                 log_access_event("LOGIN_SUCCESS", user_ok, evaluator)
                 st.session_state["logged_access"] = True
@@ -116,7 +207,7 @@ def gerar_dados_exemplo(n_horas=240, seed=42):
     for _ in range(10):
         idx = rng.integers(0, n_horas)
         dur = rng.integers(2, 8)
-        chuva[idx : idx + dur] += rng.uniform(1, 6)
+        chuva[idx: idx + dur] += rng.uniform(1, 6)
 
     bomba_ligada = (rng.random(n_horas) > 0.35).astype(int)
 
@@ -129,9 +220,9 @@ def gerar_dados_exemplo(n_horas=240, seed=42):
     lamina = np.zeros(n_horas)
     lamina[0] = 7.5
     for i in range(1, n_horas):
-        ganho_irrig = (vazao[i] / 1200)  # efeito aproximado da irrigação no protótipo
-        ganho_chuva = (chuva[i] / 20)    # conversão aproximada mm → cm para simulação
-        perda = rng.normal(0.02, 0.03)   # perdas/evaporação aproximadas
+        ganho_irrig = (vazao[i] / 1200)
+        ganho_chuva = (chuva[i] / 20)
+        perda = rng.normal(0.02, 0.03)
         lamina[i] = lamina[i - 1] + ganho_irrig + ganho_chuva - perda
 
     lamina = np.clip(lamina, 4.5, 12.0)
@@ -171,13 +262,13 @@ def carregar_dados():
 
 
 def kpis_basicos(df):
-    total_energia = df["energia_kwh"].sum()
-    total_volume = df["vazao_m3h"].sum()
-    lamina_media = df["lamina_cm"].mean()
+    total_energia = float(df["energia_kwh"].sum())
+    total_volume = float(df["vazao_m3h"].sum())
+    lamina_media = float(df["lamina_cm"].mean())
 
     eficiencia = (total_energia / total_volume) if total_volume > 0 else None
     horas_bomba = int(df["bomba_ligada"].sum())
-    chuva_24h = df[df["timestamp"] >= (df["timestamp"].max() - pd.Timedelta(hours=24))]["chuva_mm"].sum()
+    chuva_24h = float(df[df["timestamp"] >= (df["timestamp"].max() - pd.Timedelta(hours=24))]["chuva_mm"].sum())
 
     return {
         "lamina_media": lamina_media,
@@ -189,70 +280,177 @@ def kpis_basicos(df):
     }
 
 
-def recomendacao_ia(df):
+def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool, dias_pos_floracao: int):
     """
-    Suporte à decisão baseado em regras (IA explicável).
-    Gera recomendações e alertas interpretáveis para o manejo, a partir de dados operacionais.
+    Motor de regras (IA explicável) para suporte à decisão no manejo da irrigação do arroz.
+    - Usa faixas técnicas de lâmina, efeito de chuva (crédito hídrico) e opções por fase.
+    - Inclui mini-resumo operacional (6h/24h) e estado atual da bomba para logging.
     """
-    df = df.copy()
+    df = df.copy().sort_values("timestamp")
     agora = df["timestamp"].max()
 
     ult_6h = df[df["timestamp"] >= (agora - pd.Timedelta(hours=6))]
     ult_24h = df[df["timestamp"] >= (agora - pd.Timedelta(hours=24))]
 
-    chuva_24h = ult_24h["chuva_mm"].sum()
+    chuva_24h = float(ult_24h["chuva_mm"].sum())
     lamina_atual = float(df.iloc[-1]["lamina_cm"])
+    bomba_atual = int(df.iloc[-1]["bomba_ligada"])
 
-    energia_6h = ult_6h["energia_kwh"].sum()
-    volume_6h = ult_6h["vazao_m3h"].sum()
+    # 6h
+    bomba_horas_6h = int(ult_6h["bomba_ligada"].sum())
+    energia_6h = float(ult_6h["energia_kwh"].sum())
+    volume_6h = float(ult_6h["vazao_m3h"].sum())
     eficiencia_6h = (energia_6h / volume_6h) if volume_6h > 0 else None
 
+    # 24h
+    bomba_horas_24h = int(ult_24h["bomba_ligada"].sum())
+    energia_24h = float(ult_24h["energia_kwh"].sum())
+    volume_24h = float(ult_24h["vazao_m3h"].sum())
+    eficiencia_24h = (energia_24h / volume_24h) if volume_24h > 0 else None
+
+    lamina_min_24h = float(ult_24h["lamina_cm"].min()) if len(ult_24h) else np.nan
+    lamina_max_24h = float(ult_24h["lamina_cm"].max()) if len(ult_24h) else np.nan
+
+    # baseline eficiência (histórico com bomba ligada)
     df_ligada = df[df["bomba_ligada"] == 1]
     base_ef = None
-    if len(df_ligada) > 10 and df_ligada["vazao_m3h"].sum() > 0:
-        base_ef = df_ligada["energia_kwh"].sum() / df_ligada["vazao_m3h"].sum()
+    if len(df_ligada) > 10 and float(df_ligada["vazao_m3h"].sum()) > 0:
+        base_ef = float(df_ligada["energia_kwh"].sum() / df_ligada["vazao_m3h"].sum())
 
     mensagens = []
     nivel = "info"
 
-    if chuva_24h >= 10:
+    # 1) chuva como crédito hídrico (heurística: demanda ~12 mm/dia)
+    if chuva_24h >= 12:
         mensagens.append(
-            f"Recomendação: considerar reduzir/adiar o bombeamento nas próximas 6h "
-            f"(chuva acumulada nas últimas 24h: {chuva_24h:.1f} mm)."
+            f"Chuva 24h = {chuva_24h:.1f} mm (≈ demanda diária média). "
+            "Recomendação: avaliar reduzir/adiar bombeamento nas próximas 12–24h."
         )
         nivel = "warning"
 
-    if lamina_atual >= 9.5:
+    if chuva_24h >= 24:
         mensagens.append(
-            f"Alerta: lâmina d’água elevada ({lamina_atual:.1f} cm). "
-            "Avaliar redução do tempo de bombeamento para evitar excesso."
+            f"Chuva 24h alta ({chuva_24h:.1f} mm). "
+            "Recomendação: suspender temporariamente o bombeamento e monitorar lâmina para evitar excesso."
         )
         nivel = "warning"
 
-    if lamina_atual <= 6.0:
+    # 2) alvos por fase / risco de frio
+    if risco_frio and fase == "Emborrachamento/Floração":
+        alvo_min, alvo_max = 15.0, 20.0
+        mensagens.append("Risco de frio marcado: pode-se trabalhar com lâmina maior (~15–20 cm) por janela curta.")
+        nivel = "warning"
+    else:
+        if fase == "Vegetativa":
+            alvo_min, alvo_max = 2.5, 7.5
+        elif fase == "Reprodutiva":
+            alvo_min, alvo_max = 5.0, 10.0
+        elif fase == "Emborrachamento/Floração":
+            alvo_min, alvo_max = 7.5, 10.0
+        else:  # Maturação
+            alvo_min, alvo_max = 2.5, 7.5
+
+    # alertas por lâmina
+    if lamina_atual > 10.0 and not (risco_frio and fase == "Emborrachamento/Floração"):
         mensagens.append(
-            f"Ação prioritária: lâmina d’água baixa ({lamina_atual:.1f} cm). "
-            "Priorizar reposição e verificar perdas/condições de entrada de água."
+            f"Alerta: lâmina alta ({lamina_atual:.1f} cm). "
+            "Valores >10 cm podem aumentar perdas e risco de acamamento. Reduzir bombeamento e monitorar."
+        )
+        nivel = "warning"
+
+    if lamina_atual < 2.5 and fase != "Maturação":
+        mensagens.append(
+            f"Atenção: lâmina muito baixa ({lamina_atual:.1f} cm). "
+            "Abaixo de ~2,5 cm exige controle operacional mais rigoroso. Avaliar reposição."
+        )
+        nivel = "warning" if nivel != "error" else nivel
+
+    # faixa-alvo por fase
+    if lamina_atual < alvo_min:
+        mensagens.append(
+            f"Ação: lâmina abaixo do alvo da fase {fase} ({lamina_atual:.1f} < {alvo_min:.1f} cm). "
+            "Priorizar reposição e verificar perdas/entrada de água."
         )
         nivel = "error"
+    elif lamina_atual > alvo_max:
+        mensagens.append(
+            f"Observação: lâmina acima do alvo da fase {fase} ({lamina_atual:.1f} > {alvo_max:.1f} cm). "
+            "Reduzir bombeamento e acompanhar tendência."
+        )
+        nivel = "warning" if nivel != "error" else nivel
+    else:
+        mensagens.append(f"OK: lâmina dentro do alvo da fase {fase} ({alvo_min:.1f}–{alvo_max:.1f} cm).")
+        if nivel == "info":
+            nivel = "success"
 
+    # 3) manejo intermitente (controle simples ON/OFF)
+    if manejo.startswith("Intermitente") and fase != "Maturação":
+        on_threshold = max(2.5, alvo_min)
+        off_threshold = min(8.0, max(alvo_max, 7.0))
+
+        if lamina_atual <= on_threshold:
+            mensagens.append(
+                f"Manejo intermitente: sugerir RETOMAR irrigação (lâmina {lamina_atual:.1f} ≤ {on_threshold:.1f} cm)."
+            )
+            nivel = "error"
+        elif lamina_atual >= off_threshold:
+            mensagens.append(
+                f"Manejo intermitente: sugerir PAUSAR bombeamento (lâmina {lamina_atual:.1f} ≥ {off_threshold:.1f} cm)."
+            )
+            nivel = "warning" if nivel != "error" else nivel
+        else:
+            mensagens.append(f"Manejo intermitente: faixa operacional {on_threshold:.1f}–{off_threshold:.1f} cm. Manter.")
+
+    # 4) supressão na maturação (regra simples por solo / dias pós-floração)
+    if fase == "Maturação":
+        if dias_pos_floracao >= 10 and tipo_solo == "Argiloso":
+            mensagens.append(
+                f"Maturação (solo argiloso): {dias_pos_floracao} dias pós-floração. "
+                "Pode-se considerar iniciar supressão da irrigação, monitorando estágio do grão."
+            )
+            if nivel == "success":
+                nivel = "info"
+        elif dias_pos_floracao >= 10 and tipo_solo != "Argiloso":
+            mensagens.append(
+                f"Maturação (solo arenoso/bem drenado): {dias_pos_floracao} dias pós-floração. "
+                "Recomendação: cautela e possível postergação da supressão devido à maior drenagem."
+            )
+            if nivel == "success":
+                nivel = "info"
+        else:
+            mensagens.append(
+                "Maturação: para supressão, use floração plena e estágio do grão (ex.: pastoso predominante) como referência."
+            )
+            if nivel == "success":
+                nivel = "info"
+
+    # 5) eficiência energética (desvio do baseline)
     if eficiencia_6h is not None and base_ef is not None:
         if eficiencia_6h > base_ef * 1.15:
             mensagens.append(
-                f"Alerta de eficiência energética: últimas 6h = {eficiencia_6h:.3f} kWh/m³ "
-                f"vs baseline = {base_ef:.3f} kWh/m³. "
-                "Recomenda-se inspeção de condições hidráulicas e operacionais."
+                f"Alerta eficiência energética: 6h = {eficiencia_6h:.3f} kWh/m³ vs baseline = {base_ef:.3f} kWh/m³. "
+                "Inspecionar condições hidráulicas e operação da bomba."
             )
-            nivel = "warning"
+            nivel = "warning" if nivel != "error" else nivel
 
-    if not mensagens:
-        mensagens.append(
-            "Condição operacional dentro do padrão observado para o período. "
-            "Manter monitoramento e reavaliar em intervalo regular."
-        )
-        nivel = "success"
+    meta = {
+        "bomba_atual": bomba_atual,
+        "lamina_atual": lamina_atual,
+        "chuva_24h": chuva_24h,
+        "bomba_horas_6h": bomba_horas_6h,
+        "energia_6h": energia_6h,
+        "volume_6h": volume_6h,
+        "eficiencia_6h": eficiencia_6h,
+        "bomba_horas_24h": bomba_horas_24h,
+        "energia_24h": energia_24h,
+        "volume_24h": volume_24h,
+        "eficiencia_24h": eficiencia_24h,
+        "lamina_min_24h": lamina_min_24h,
+        "lamina_max_24h": lamina_max_24h,
+        "baseline_ef": base_ef,
+    }
 
-    return nivel, mensagens
+    return nivel, mensagens, meta
 
 
 # =========================================================
@@ -260,13 +458,12 @@ def recomendacao_ia(df):
 # =========================================================
 def aplicar_otimizacao_regras(df, lamina_max=9.5, chuva_min_mm=10.0):
     """
-    Simula um cenário otimizado simples (regras explicáveis):
+    Simula um cenário otimizado simples:
     - Desliga a bomba quando chuva 24h >= chuva_min_mm OU lâmina >= lamina_max.
     - Caso contrário, mantém o estado original.
     """
     df = df.copy().sort_values("timestamp")
 
-    # chuva acumulada 24h (rolling time-based)
     df["chuva_24h"] = (
         df.set_index("timestamp")["chuva_mm"]
         .rolling("24h")
@@ -284,9 +481,6 @@ def aplicar_otimizacao_regras(df, lamina_max=9.5, chuva_min_mm=10.0):
 
 
 def comparar_cenarios(df, tarifa_kwh=0.95):
-    """
-    Compara Baseline (colunas originais) vs Otimizado (colunas *_otim_*).
-    """
     energia_base = float(df["energia_kwh"].sum())
     volume_base = float(df["vazao_m3h"].sum())
     horas_bomba_base = int(df["bomba_ligada"].sum())
@@ -384,8 +578,6 @@ login_user = st.session_state.get("login_user", "usuario")
 
 st.title(APP_TITLE)
 st.caption(APP_SUBTITLE)
-
-# ✅ Mostra no topo o avaliador
 st.markdown(f"**Avaliador:** {evaluator_name}")
 
 bloco_contexto_tcc()
@@ -396,10 +588,8 @@ with st.sidebar:
     st.caption(f"Avaliador: **{evaluator_name}**")
 
     if st.button("Sair"):
-        # log de logout
         log_access_event("LOGOUT", login_user, evaluator_name)
 
-        # limpa sessão
         st.session_state["authenticated"] = False
         st.session_state["logged_access"] = False
         st.session_state.pop("login_user", None)
@@ -421,11 +611,53 @@ periodo = st.sidebar.selectbox(
     index=2,
 )
 
-# ✅ Parâmetros da simulação (para a aba Resultados)
+# parâmetros agronômicos (motor de regras)
+st.sidebar.header("Parâmetros agronômicos (arroz)")
+fase = st.sidebar.selectbox(
+    "Fase do cultivo",
+    ["Vegetativa", "Reprodutiva", "Emborrachamento/Floração", "Maturação"],
+    index=0,
+)
+manejo = st.sidebar.selectbox(
+    "Manejo de irrigação",
+    ["Contínuo", "Intermitente (fornecimento intermitente)"],
+    index=0,
+)
+tipo_solo = st.sidebar.selectbox(
+    "Tipo de solo (supressão)",
+    ["Argiloso", "Arenoso/bem drenado"],
+    index=0,
+)
+risco_frio = st.sidebar.checkbox("Risco de frio (<16°C) no emborrachamento?", value=False)
+dias_pos_floracao = st.sidebar.number_input("Dias após floração plena", min_value=0, value=0, step=1)
+
+# parâmetros da simulação (aba Resultados)
 st.sidebar.header("Parâmetros (simulação)")
 tarifa_kwh = st.sidebar.number_input("Tarifa de energia (R$/kWh)", min_value=0.0, value=0.95, step=0.05)
-lamina_max = st.sidebar.slider("Lâmina máxima (cm)", min_value=7.0, max_value=12.0, value=9.5, step=0.1)
-chuva_min_mm = st.sidebar.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=30.0, value=10.0, step=0.5)
+lamina_max = st.sidebar.slider("Lâmina máxima (cm)", min_value=7.0, max_value=20.0, value=10.0, step=0.5)
+chuva_min_mm = st.sidebar.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=50.0, value=12.0, step=1.0)
+
+# evidências / logs
+st.sidebar.header("Evidências (logs)")
+colL, colR = st.sidebar.columns(2)
+with colL:
+    if st.button("Limpar logs"):
+        removed = clear_logs()
+        if removed:
+            st.success("Logs removidos: " + ", ".join(removed))
+        else:
+            st.info("Nenhum log para remover.")
+
+rec_log_path = os.path.join("logs", "recommendations_log.csv")
+res_log_path = os.path.join("logs", "resultados_piloto.csv")
+
+if os.path.exists(rec_log_path):
+    with open(rec_log_path, "rb") as f:
+        st.sidebar.download_button("Baixar recommendations_log.csv", data=f, file_name="recommendations_log.csv", mime="text/csv")
+
+if os.path.exists(res_log_path):
+    with open(res_log_path, "rb") as f:
+        st.sidebar.download_button("Baixar resultados_piloto.csv", data=f, file_name="resultados_piloto.csv", mime="text/csv")
 
 if periodo == "Últimas 24h":
     df_f = df[df["timestamp"] >= (max_data - pd.Timedelta(hours=24))]
@@ -436,7 +668,6 @@ elif periodo == "Últimos 7 dias":
 else:
     df_f = df.copy()
 
-# ✅ Agora com 4 abas (inclui Resultados)
 tabs = st.tabs(["Dashboard", "Arquitetura da Solução", "Metodologia (simulação)", "Resultados (piloto)"])
 
 
@@ -451,7 +682,32 @@ with tabs[0]:
     c5.metric("Horas bomba ligada", f"{int(k['horas_bomba'])} h")
 
     st.subheader("Recomendação automática (IA) e alertas")
-    nivel, mensagens = recomendacao_ia(df_f)
+    nivel, mensagens, meta = recomendacao_ia(
+        df_f,
+        fase=fase,
+        manejo=manejo,
+        tipo_solo=tipo_solo,
+        risco_frio=risco_frio,
+        dias_pos_floracao=int(dias_pos_floracao),
+    )
+
+    # registra 1x por combinação + timestamp final do período
+    log_key = f"log_rec::{periodo}::{fase}::{manejo}::{tipo_solo}::{risco_frio}::{int(dias_pos_floracao)}::{df_f['timestamp'].max()}"
+    if st.session_state.get(log_key) != True:
+        log_recommendation_event(
+            nivel=nivel,
+            mensagens=mensagens,
+            username=login_user,
+            evaluator=evaluator_name,
+            periodo_label=periodo,
+            fase=fase,
+            manejo=manejo,
+            tipo_solo=tipo_solo,
+            risco_frio=risco_frio,
+            dias_pos_floracao=int(dias_pos_floracao),
+            meta=meta,
+        )
+        st.session_state[log_key] = True
 
     texto = "\n".join([f"- {m}" for m in mensagens])
     if nivel == "success":
@@ -462,6 +718,19 @@ with tabs[0]:
         st.warning(texto)
     else:
         st.error(texto)
+
+    st.subheader("Mini-resumo operacional (últimas 6h/24h)")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Bomba agora", "Ligada" if meta["bomba_atual"] == 1 else "Desligada")
+    m2.metric("Horas bomba (6h)", f"{meta['bomba_horas_6h']} h")
+    m3.metric("Energia (6h)", f"{meta['energia_6h']:.1f} kWh")
+    m4.metric("Eficiência (6h)", f"{(meta['eficiencia_6h'] if meta['eficiencia_6h'] is not None else 0):.3f} kWh/m³")
+
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Horas bomba (24h)", f"{meta['bomba_horas_24h']} h")
+    n2.metric("Energia (24h)", f"{meta['energia_24h']:.1f} kWh")
+    n3.metric("Volume (24h)", f"{meta['volume_24h']:.1f} m³")
+    n4.metric("Lâmina (24h)", f"{meta['lamina_min_24h']:.1f}–{meta['lamina_max_24h']:.1f} cm")
 
     st.subheader("Tendências (período selecionado)")
     cc1, cc2 = st.columns(2)
@@ -498,7 +767,6 @@ with tabs[1]:
         """
     )
 
-    # (Opcional) Mostrar imagem de arquitetura, se existir
     if os.path.exists(ARQ_IMG_PATH):
         st.image(ARQ_IMG_PATH, caption="Arquitetura da solução (imagem)", use_container_width=True)
     else:
@@ -536,7 +804,6 @@ with tabs[3]:
         "Quando houver dados reais no CSV, a comparação se aplica ao período selecionado."
     )
 
-    # aplica otimização e compara
     df_sim = aplicar_otimizacao_regras(df_f, lamina_max=lamina_max, chuva_min_mm=chuva_min_mm)
     res = comparar_cenarios(df_sim, tarifa_kwh=tarifa_kwh)
 
@@ -585,13 +852,12 @@ with tabs[3]:
         )
         st.success(f"Resultados salvos em: {path}")
 
-    log_path = os.path.join("logs", "resultados_piloto.csv")
-    if os.path.exists(log_path):
+    if os.path.exists(res_log_path):
         st.caption("Histórico salvo (últimas 20 linhas):")
-        hist = pd.read_csv(log_path)
+        hist = pd.read_csv(res_log_path)
         st.dataframe(hist.tail(20), use_container_width=True)
 
-        with open(log_path, "rb") as f:
+        with open(res_log_path, "rb") as f:
             st.download_button(
                 label="Baixar CSV de evidências",
                 data=f,
