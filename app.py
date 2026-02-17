@@ -117,9 +117,10 @@ def clear_logs():
     os.makedirs("logs", exist_ok=True)
     rec_log_path = os.path.join("logs", "recommendations_log.csv")
     res_log_path = os.path.join("logs", "resultados_piloto.csv")
+    eco_log_path = os.path.join("logs", "modelo_economico.csv")
 
     removed = []
-    for p in [rec_log_path, res_log_path]:
+    for p in [rec_log_path, res_log_path, eco_log_path]:
         if os.path.exists(p):
             os.remove(p)
             removed.append(os.path.basename(p))
@@ -285,6 +286,9 @@ def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool
     Motor de regras (IA explicável) para suporte à decisão no manejo da irrigação do arroz.
     - Usa faixas técnicas de lâmina, efeito de chuva (crédito hídrico) e opções por fase.
     - Inclui mini-resumo operacional (6h/24h) e estado atual da bomba para logging.
+
+    Ajuste TCC: reforço de manejo contínuo com referência ~7,5 cm (faixa operacional 6,5–8,5 cm),
+    prática comum após 1–2 folhas e sustentada por ~80–100 dias (configurado na seção econômica).
     """
     df = df.copy().sort_values("timestamp")
     agora = df["timestamp"].max()
@@ -349,6 +353,13 @@ def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool
             alvo_min, alvo_max = 7.5, 10.0
         else:  # Maturação
             alvo_min, alvo_max = 2.5, 7.5
+
+    # reforço para manejo contínuo (inundação contínua ~7,5 cm)
+    if manejo == "Contínuo" and not (risco_frio and fase == "Emborrachamento/Floração"):
+        alvo_min, alvo_max = 6.5, 8.5
+        mensagens.append("Manejo contínuo: referência operacional ~7,5 cm (faixa 6,5–8,5 cm), usual após 1–2 folhas.")
+        if nivel == "success":
+            nivel = "info"
 
     # alertas por lâmina
     if lamina_atual > 10.0 and not (risco_frio and fase == "Emborrachamento/Floração"):
@@ -559,6 +570,91 @@ def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, c
     return out_path
 
 
+# =========================================================
+# FUNÇÕES — MODELO ECONÔMICO (value-based pricing) + LOG CSV
+# =========================================================
+def calc_precificacao_por_valor(
+    economia_rs_mensal: float,
+    pct_captura: float = 0.15,
+    piso: float = 1200.0,
+    teto: float = 3800.0
+):
+    """
+    Sugere preço mensal baseado em 'value-based pricing':
+    preço = economia_mensal * pct_captura, limitado por piso/teto.
+    """
+    if economia_rs_mensal is None or economia_rs_mensal <= 0:
+        return 0.0
+    preco = economia_rs_mensal * float(pct_captura)
+    return float(min(max(preco, piso), teto))
+
+
+def calc_roi_payback(preco_mensal: float, economia_rs_mensal: float, investimento_inicial: float):
+    """
+    ROI mensal simples e payback em meses.
+    ROI = (economia - preço) / preço
+    Payback = investimento / (economia - preço)
+    """
+    if economia_rs_mensal <= 0 or preco_mensal <= 0:
+        return {"roi_mensal": None, "payback_meses": None, "ganho_liquido": None}
+
+    ganho_liquido = economia_rs_mensal - preco_mensal
+    roi_mensal = ganho_liquido / preco_mensal
+
+    payback = None
+    if investimento_inicial is not None and investimento_inicial > 0 and ganho_liquido > 0:
+        payback = investimento_inicial / ganho_liquido
+
+    return {
+        "roi_mensal": float(roi_mensal),
+        "payback_meses": float(payback) if payback is not None else None,
+        "ganho_liquido": float(ganho_liquido),
+    }
+
+
+def salvar_modelo_economico(evidencia: dict, username: str, evaluator: str):
+    """
+    Salva uma linha do Modelo Econômico (evidência para o TCC) em CSV.
+    Inclui: economia mensal/safra, % captura, preço sugerido, ROI e payback.
+    """
+    os.makedirs("logs", exist_ok=True)
+    out_path = os.path.join("logs", "modelo_economico.csv")
+
+    ts = datetime.now().isoformat(timespec="seconds")
+
+    row = {
+        "timestamp_execucao": ts,
+        "user": username,
+        "evaluator": evaluator,
+
+        "periodo": str(evidencia.get("periodo")),
+        "tarifa_rs_kwh": float(evidencia.get("tarifa_rs_kwh", 0.0)),
+        "lamina_max_cm": float(evidencia.get("lamina_max_cm", np.nan)),
+        "chuva_min_24h_mm": float(evidencia.get("chuva_min_24h_mm", np.nan)),
+
+        "economia_periodo_rs": float(evidencia.get("economia_periodo_rs", 0.0)),
+        "economia_mensal_rs_estim": float(evidencia.get("economia_mensal_rs_estim", 0.0)),
+        "economia_safra_dias": int(evidencia.get("economia_safra_dias", 0)),
+        "economia_safra_rs_estim": float(evidencia.get("economia_safra_rs_estim", 0.0)),
+
+        "pct_captura": float(evidencia.get("pct_captura", 0.0)),
+        "preco_sugerido_rs_mensal": float(evidencia.get("preco_sugerido_rs_mensal", 0.0)),
+        "investimento_inicial_rs": float(evidencia.get("investimento_inicial_rs", 0.0)),
+
+        "roi_mensal": float(evidencia.get("roi_mensal")) if evidencia.get("roi_mensal") is not None else np.nan,
+        "payback_meses": float(evidencia.get("payback_meses")) if evidencia.get("payback_meses") is not None else np.nan,
+    }
+
+    df_row = pd.DataFrame([row])
+
+    if not os.path.exists(out_path):
+        df_row.to_csv(out_path, index=False, encoding="utf-8")
+    else:
+        df_row.to_csv(out_path, mode="a", header=False, index=False, encoding="utf-8")
+
+    return out_path
+
+
 def bloco_contexto_tcc():
     st.markdown(
         """
@@ -568,6 +664,13 @@ def bloco_contexto_tcc():
         alertas e recomendações automatizadas, apoiando a tomada de decisão do manejo.
         """
     )
+
+
+def fmt_br_money(x: float) -> str:
+    try:
+        return f"{float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "—"
 
 
 # =========================================================
@@ -589,7 +692,6 @@ with st.sidebar:
 
     if st.button("Sair"):
         log_access_event("LOGOUT", login_user, evaluator_name)
-
         st.session_state["authenticated"] = False
         st.session_state["logged_access"] = False
         st.session_state.pop("login_user", None)
@@ -637,6 +739,17 @@ tarifa_kwh = st.sidebar.number_input("Tarifa de energia (R$/kWh)", min_value=0.0
 lamina_max = st.sidebar.slider("Lâmina máxima (cm)", min_value=7.0, max_value=20.0, value=10.0, step=0.5)
 chuva_min_mm = st.sidebar.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=50.0, value=12.0, step=1.0)
 
+# modelo econômico (pedido do orientador)
+st.sidebar.header("Modelo econômico (TCC)")
+pct_captura = st.sidebar.slider("Captura de valor (% da economia)", 5, 30, 15, 1) / 100.0
+investimento_inicial = st.sidebar.number_input("Investimento inicial estimado (R$)", min_value=0.0, value=12400.0, step=100.0)
+
+st.sidebar.subheader("Safra (irrigação contínua)")
+duracao_safra_dias = st.sidebar.slider("Duração da lâmina contínua (dias)", 80, 100, 90, 1)
+
+piso_plano = st.sidebar.number_input("Piso do plano (R$/mês)", min_value=0.0, value=1200.0, step=100.0)
+teto_plano = st.sidebar.number_input("Teto do plano (R$/mês)", min_value=0.0, value=3800.0, step=100.0)
+
 # evidências / logs
 st.sidebar.header("Evidências (logs)")
 colL, colR = st.sidebar.columns(2)
@@ -650,6 +763,7 @@ with colL:
 
 rec_log_path = os.path.join("logs", "recommendations_log.csv")
 res_log_path = os.path.join("logs", "resultados_piloto.csv")
+eco_log_path = os.path.join("logs", "modelo_economico.csv")
 
 if os.path.exists(rec_log_path):
     with open(rec_log_path, "rb") as f:
@@ -658,6 +772,10 @@ if os.path.exists(rec_log_path):
 if os.path.exists(res_log_path):
     with open(res_log_path, "rb") as f:
         st.sidebar.download_button("Baixar resultados_piloto.csv", data=f, file_name="resultados_piloto.csv", mime="text/csv")
+
+if os.path.exists(eco_log_path):
+    with open(eco_log_path, "rb") as f:
+        st.sidebar.download_button("Baixar modelo_economico.csv", data=f, file_name="modelo_economico.csv", mime="text/csv")
 
 if periodo == "Últimas 24h":
     df_f = df[df["timestamp"] >= (max_data - pd.Timedelta(hours=24))]
@@ -668,9 +786,20 @@ elif periodo == "Últimos 7 dias":
 else:
     df_f = df.copy()
 
-tabs = st.tabs(["Dashboard", "Arquitetura da Solução", "Metodologia (simulação)", "Resultados (piloto)"])
+tabs = st.tabs([
+    "Dashboard",
+    "Arquitetura da Solução",
+    "Metodologia (simulação)",
+    "Resultados (piloto)",
+    "Modelo Econômico (TCC)",
+    "Segmentação (TCC)",
+    "MVP vs Visão Futura",
+    "Escala & Gargalos",
+])
 
-
+# =========================================================
+# TAB 0 — DASHBOARD
+# =========================================================
 with tabs[0]:
     k = kpis_basicos(df_f)
 
@@ -747,6 +876,9 @@ with tabs[0]:
     st.dataframe(df_f.tail(50), use_container_width=True)
 
 
+# =========================================================
+# TAB 1 — ARQUITETURA
+# =========================================================
 with tabs[1]:
     st.subheader("Arquitetura da Solução Proposta")
 
@@ -773,6 +905,9 @@ with tabs[1]:
         st.caption("Imagem de arquitetura não encontrada em: data/arquitetura_irrigacao.png")
 
 
+# =========================================================
+# TAB 2 — METODOLOGIA
+# =========================================================
 with tabs[2]:
     st.subheader("Metodologia (simulação)")
 
@@ -796,6 +931,9 @@ with tabs[2]:
     )
 
 
+# =========================================================
+# TAB 3 — RESULTADOS PILOTO
+# =========================================================
 with tabs[3]:
     st.subheader("Resultados (piloto) — Baseline vs Otimizado (simulação por regras)")
     st.caption(
@@ -811,7 +949,7 @@ with tabs[3]:
     c1.metric("Energia Base (kWh)", f"{res['energia_base']:.1f}")
     c2.metric("Energia Otim (kWh)", f"{res['energia_otim']:.1f}")
     c3.metric("Economia (kWh)", f"{res['economia_kwh']:.1f}")
-    c4.metric("Economia (R$)", f"{res['economia_rs']:.2f}")
+    c4.metric("Economia (R$)", fmt_br_money(res["economia_rs"]))
 
     st.markdown("### Eficiência e operação")
     d1, d2, d3, d4 = st.columns(4)
@@ -867,3 +1005,190 @@ with tabs[3]:
 
     with st.expander("Ver base simulada/real com colunas de otimização (amostra)"):
         st.dataframe(df_sim.tail(80), use_container_width=True)
+
+
+# =========================================================
+# TAB 4 — MODELO ECONÔMICO
+# =========================================================
+with tabs[4]:
+    st.subheader("Modelo Econômico (TCC) — Economia → Precificação → ROI")
+
+    df_sim = aplicar_otimizacao_regras(df_f, lamina_max=lamina_max, chuva_min_mm=chuva_min_mm)
+    res = comparar_cenarios(df_sim, tarifa_kwh=tarifa_kwh)
+
+    economia_periodo_rs = float(res["economia_rs"])
+    energia_periodo_kwh = float(res["economia_kwh"])
+
+    # fator para "mensalizar" a economia conforme período escolhido
+    if periodo == "Últimas 24h":
+        fator_mes = 30
+        dias_periodo = 1
+    elif periodo == "Últimos 3 dias":
+        fator_mes = 10
+        dias_periodo = 3
+    elif periodo == "Últimos 7 dias":
+        fator_mes = (30 / 7)
+        dias_periodo = 7
+    else:
+        # "Tudo": calcula duração aproximada do período disponível
+        dias_periodo = max(1, int((df_f["timestamp"].max() - df_f["timestamp"].min()).total_seconds() / 86400))
+        fator_mes = 30 / dias_periodo
+
+    economia_mensal_rs = economia_periodo_rs * fator_mes
+    economia_mensal_kwh = energia_periodo_kwh * fator_mes
+
+    # economia na safra (80–100 dias de inundação contínua)
+    economia_diaria_rs = economia_periodo_rs / dias_periodo
+    economia_safra_rs = economia_diaria_rs * duracao_safra_dias
+
+    preco_sugerido = calc_precificacao_por_valor(
+        economia_rs_mensal=economia_mensal_rs,
+        pct_captura=pct_captura,
+        piso=piso_plano,
+        teto=teto_plano,
+    )
+
+    met = calc_roi_payback(
+        preco_mensal=preco_sugerido,
+        economia_rs_mensal=economia_mensal_rs,
+        investimento_inicial=investimento_inicial,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Economia estimada (R$/mês)", fmt_br_money(economia_mensal_rs))
+    c2.metric("Economia estimada na safra (R$)", fmt_br_money(economia_safra_rs))
+    c3.metric("Preço sugerido (R$/mês)", fmt_br_money(preco_sugerido))
+    c4.metric("ROI mensal (líquido)", f"{met['roi_mensal']*100:.1f}%" if met["roi_mensal"] is not None else "—")
+
+    st.markdown("### Payback e interpretação")
+    if met["payback_meses"] is not None:
+        st.success(f"Payback estimado: **{met['payback_meses']:.1f} meses** (ganho líquido = economia − preço).")
+    else:
+        st.info("Payback não calculado (economia insuficiente ou preço zerado).")
+
+    st.markdown(
+        f"""
+**Ligação direta preço ↔ economia (pedido do orientador):**
+- O protótipo estima economia financeira (R$) pela diferença entre cenário base e otimizado.
+- A precificação é sugerida por captura de valor (**{pct_captura*100:.0f}%** da economia mensal), limitada por piso/teto.
+- Isso torna explícita a justificativa econômica da assinatura SaaS (value-based pricing).
+        """
+    )
+
+    st.markdown("### Evidência exportável (para anexar no TCC)")
+    evidencia = {
+        "periodo": periodo,
+        "tarifa_rs_kwh": tarifa_kwh,
+        "lamina_max_cm": lamina_max,
+        "chuva_min_24h_mm": chuva_min_mm,
+
+        "economia_periodo_rs": economia_periodo_rs,
+        "economia_mensal_rs_estim": economia_mensal_rs,
+        "economia_safra_dias": duracao_safra_dias,
+        "economia_safra_rs_estim": economia_safra_rs,
+
+        "pct_captura": pct_captura,
+        "preco_sugerido_rs_mensal": preco_sugerido,
+        "investimento_inicial_rs": investimento_inicial,
+
+        "roi_mensal": met["roi_mensal"],
+        "payback_meses": met["payback_meses"],
+    }
+    st.json(evidencia)
+
+    st.markdown("### Salvar evidência econômica (CSV)")
+    colA, colB = st.columns([1, 2])
+
+    with colA:
+        if st.button("Salvar modelo econômico"):
+            path = salvar_modelo_economico(
+                evidencia=evidencia,
+                username=login_user,
+                evaluator=evaluator_name,
+            )
+            st.success(f"Modelo econômico salvo em: {path}")
+
+    with colB:
+        if os.path.exists(eco_log_path):
+            st.caption("Histórico salvo (últimas 20 linhas):")
+            hist_eco = pd.read_csv(eco_log_path)
+            st.dataframe(hist_eco.tail(20), use_container_width=True)
+
+
+# =========================================================
+# TAB 5 — SEGMENTAÇÃO (TCC)
+# =========================================================
+with tabs[5]:
+    st.subheader("Segmentação (TCC) — Priorização do Cliente Inicial")
+
+    st.markdown(
+        """
+**Segmento prioritário (beachhead):**
+- Produtores de arroz irrigado no RS;
+- Médio/grande porte (ex.: área irrigada ≥ 300 ha);
+- Bombeamento elétrico + medições (energia/nível/vazão);
+- Preferencialmente com SCADA/sensores já instalados;
+- Alto custo energético (ex.: > R$ 50 mil/mês).
+        """
+    )
+
+    st.markdown("### Checklist de aderência do cliente (simulação)")
+    area_ha = st.number_input("Área irrigada (ha)", min_value=0, value=300, step=50)
+    tem_scada = st.checkbox("Possui SCADA / automação?", value=True)
+    tem_medicao_energia = st.checkbox("Possui medição de energia (kWh)?", value=True)
+    custo_mensal = st.number_input("Custo mensal de energia (R$)", min_value=0.0, value=50000.0, step=5000.0)
+
+    score = 0
+    score += 1 if area_ha >= 300 else 0
+    score += 1 if tem_scada else 0
+    score += 1 if tem_medicao_energia else 0
+    score += 1 if custo_mensal >= 50000 else 0
+
+    st.metric("Aderência ao segmento inicial (0–4)", score)
+
+    if score >= 3:
+        st.success("Cliente bem alinhado ao segmento inicial — maior chance de ROI rápido e implantação simples.")
+    else:
+        st.warning("Cliente fora do foco inicial — pode exigir maior customização e reduzir velocidade de escala.")
+
+
+# =========================================================
+# TAB 6 — MVP vs VISÃO FUTURA
+# =========================================================
+with tabs[6]:
+    st.subheader("MVP vs Visão Futura")
+    st.markdown(
+        """
+| Dimensão | MVP (piloto) | Visão Futura (escala) |
+|---|---|---|
+| Objetivo | Evidenciar economia e controle operacional | Otimização e previsões com IA |
+| Tipo de análise | Descritiva/diagnóstica (BI) | Preditiva/prescritiva (ML) |
+| Alertas | Regras interpretáveis | Alertas inteligentes + priorização |
+| Integração | Sensores/SCADA + histórico | APIs clima + mobile + benchmark |
+| Implantação | Customizada no piloto | Padronizada e replicável |
+        """
+    )
+
+
+# =========================================================
+# TAB 7 — ESCALA & GARGALOS
+# =========================================================
+with tabs[7]:
+    st.subheader("Escala & Gargalos Operacionais (TCC)")
+    st.markdown(
+        """
+**Gargalos para escalar:**
+- Integração com SCADA heterogêneo (protocolos/dados);
+- Padronização de sensores e qualidade do dado;
+- Conectividade rural e disponibilidade de rede;
+- Treinamento/adoção (mudança cultural);
+- Suporte técnico especializado e SLAs.
+
+**Mitigações planejadas:**
+- Templates de integração por fornecedor;
+- Validação automática de qualidade do dado;
+- Interface simples + tutoriais;
+- Documentação e onboarding padronizado;
+- Priorização de nicho inicial com infraestrutura já instalada.
+        """
+    )
