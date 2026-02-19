@@ -1,7 +1,7 @@
 # =========================================================
 # AgroData — Irrigação (BI + Data Science + IA)
 # Protótipo acadêmico (TCC) com:
-# ✅ Login + logs
+# ✅ Login + logs (com ID de execução + versão)
 # ✅ KPIs + recomendações (regras explicáveis)
 # ✅ Baseline vs Otimizado (simulação)
 # ✅ Modelo Econômico completo:
@@ -10,22 +10,31 @@
 #    - Redução variável por fase fenológica
 #    - Gráficos (PNG) + download
 #    - Evidências (CSV) + download
+#
+# Melhorias aplicadas (recomendações):
+# ✅ Rolling 24h sem desalinhamento
+# ✅ Preparado para dados reais com intervalo irregular (dt_horas)
+# ✅ Cache de carregamento de dados
+# ✅ Funções renomeadas para coerência (cenários ≠ VPL)
+# ✅ “Validação automática do dado” (qualidade) + evidências
+# ✅ APP_VERSION + RUN_ID (execução) nos logs
+# ✅ freq="h" (evita warnings)
 # =========================================================
 
 import os
 import io
 import hmac
+import uuid
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-
 import matplotlib.pyplot as plt
 
 
 # =========================================================
-# CONFIG (chamar UMA vez)
+# CONFIG
 # =========================================================
 st.set_page_config(page_title="AgroData — Irrigação", layout="wide")
 
@@ -33,6 +42,7 @@ st.set_page_config(page_title="AgroData — Irrigação", layout="wide")
 # =========================================================
 # CONSTANTES / PATHS
 # =========================================================
+APP_VERSION = "0.4.0"
 APP_TITLE = "AgroData — Irrigação (BI + Data Science + IA)"
 APP_SUBTITLE = (
     "Protótipo acadêmico para o TCC: monitoramento operacional da irrigação com indicadores (KPIs), "
@@ -47,13 +57,22 @@ REC_LOG_PATH = os.path.join(LOG_DIR, "recommendations_log.csv")
 RES_LOG_PATH = os.path.join(LOG_DIR, "resultados_piloto.csv")
 ECO_LOG_PATH = os.path.join(LOG_DIR, "modelo_economico.csv")
 ECO_CENARIOS_LOG_PATH = os.path.join(LOG_DIR, "cenarios_vpl_fenologia.csv")
+DQ_LOG_PATH = os.path.join(LOG_DIR, "data_quality_log.csv")
 
-# Defaults alinhados com seu cenário real
+# Defaults (seu cenário)
 DEFAULT_TARIFA = 0.82
 DEFAULT_HORAS_DIA = 20
 DEFAULT_TAXA_DESCONTO = 0.12
 DEFAULT_HORIZONTE_ANOS = 5
-DEFAULT_ALPHA_RECEITA = 0.20  # % captura do projeto em cima da economia bruta
+DEFAULT_ALPHA_RECEITA = 0.20  # % receita do projeto em cima da economia bruta
+
+
+# =========================================================
+# SESSÃO — ID de execução (evidência)
+# =========================================================
+if "run_id" not in st.session_state:
+    st.session_state["run_id"] = str(uuid.uuid4())[:8]
+RUN_ID = st.session_state["run_id"]
 
 
 # =========================================================
@@ -62,6 +81,7 @@ DEFAULT_ALPHA_RECEITA = 0.20  # % captura do projeto em cima da economia bruta
 def get_settings():
     """
     Lê configurações via st.secrets (produção) ou variáveis de ambiente (local).
+    Observação: fallback admin/admin é apenas para protótipo acadêmico.
     """
     app_user = str(st.secrets.get("APP_USER", os.getenv("APP_USER", "admin")))
     app_pass = str(st.secrets.get("APP_PASSWORD", os.getenv("APP_PASSWORD", "admin")))
@@ -70,18 +90,15 @@ def get_settings():
 
 
 def log_access_event(event: str, username: str, evaluator: str):
-    """
-    Registra eventos simples de acesso em CSV (timestamp local).
-    """
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, "access_log.csv")
 
     ts = datetime.now().isoformat(timespec="seconds")
-    row = f"{ts},{event},{username},{evaluator}\n"
+    row = f"{ts},{event},{username},{evaluator},{APP_VERSION},{RUN_ID}\n"
 
     if not os.path.exists(log_path):
         with open(log_path, "w", encoding="utf-8") as f:
-            f.write("timestamp,event,user,evaluator\n")
+            f.write("timestamp,event,user,evaluator,app_version,run_id\n")
 
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(row)
@@ -100,10 +117,6 @@ def log_recommendation_event(
     dias_pos_floracao: int,
     meta: dict,
 ):
-    """
-    Registra recomendações/alertas gerados pelo motor de regras em CSV.
-    Inclui mini-resumo operacional (6h/24h) e estado da bomba.
-    """
     os.makedirs(LOG_DIR, exist_ok=True)
 
     ts = datetime.now().isoformat(timespec="seconds")
@@ -121,6 +134,8 @@ def log_recommendation_event(
         "tipo_solo": tipo_solo,
         "risco_frio": int(bool(risco_frio)),
         "dias_pos_floracao": int(dias_pos_floracao),
+        "app_version": APP_VERSION,
+        "run_id": RUN_ID,
 
         # estado atual
         "bomba_atual": int(meta.get("bomba_atual", 0)),
@@ -148,7 +163,6 @@ def log_recommendation_event(
     }
 
     df_row = pd.DataFrame([row])
-
     if not os.path.exists(REC_LOG_PATH):
         df_row.to_csv(REC_LOG_PATH, index=False, encoding="utf-8")
     else:
@@ -157,19 +171,37 @@ def log_recommendation_event(
     return REC_LOG_PATH
 
 
+def log_data_quality_event(username: str, evaluator: str, periodo_label: str, metrics: dict):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    ts = datetime.now().isoformat(timespec="seconds")
+
+    row = {
+        "timestamp": ts,
+        "user": username,
+        "evaluator": evaluator,
+        "periodo": periodo_label,
+        "app_version": APP_VERSION,
+        "run_id": RUN_ID,
+        **metrics,
+    }
+
+    df_row = pd.DataFrame([row])
+    if not os.path.exists(DQ_LOG_PATH):
+        df_row.to_csv(DQ_LOG_PATH, index=False, encoding="utf-8")
+    else:
+        df_row.to_csv(DQ_LOG_PATH, mode="a", header=False, index=False, encoding="utf-8")
+    return DQ_LOG_PATH
+
+
 def clear_logs():
-    """
-    Remove logs CSV e limpa flags de sessão associadas.
-    """
     os.makedirs(LOG_DIR, exist_ok=True)
 
     removed = []
-    for p in [REC_LOG_PATH, RES_LOG_PATH, ECO_LOG_PATH, ECO_CENARIOS_LOG_PATH]:
+    for p in [REC_LOG_PATH, RES_LOG_PATH, ECO_LOG_PATH, ECO_CENARIOS_LOG_PATH, DQ_LOG_PATH]:
         if os.path.exists(p):
             os.remove(p)
             removed.append(os.path.basename(p))
 
-    # limpa flags de sessão para permitir novo registro limpo
     for k in list(st.session_state.keys()):
         if str(k).startswith("log_rec::"):
             st.session_state.pop(k, None)
@@ -178,9 +210,6 @@ def clear_logs():
 
 
 def check_login():
-    """
-    Tela de login com sessão. Sem autenticação, não renderiza absolutamente nada do dashboard.
-    """
     if st.session_state.get("authenticated", False):
         return True
 
@@ -220,22 +249,113 @@ if not check_login():
 
 
 # =========================================================
-# FUNÇÕES (DADOS, KPIs e SUPORTE À DECISÃO)
+# DADOS — helpers para dt e integração (intervalo irregular)
+# =========================================================
+def ensure_datetime_sorted(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    return df
+
+
+def add_dt_hours(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    dt_horas = diferença para o próximo ponto (em horas).
+    Para o último ponto, usa mediana do dt (fallback 1h).
+    """
+    df = df.copy()
+    dt = df["timestamp"].shift(-1) - df["timestamp"]
+    dt_h = dt.dt.total_seconds() / 3600.0
+    med = float(np.nanmedian(dt_h.to_numpy())) if np.isfinite(np.nanmedian(dt_h.to_numpy())) else 1.0
+    df["dt_horas"] = dt_h.fillna(med).clip(lower=0.0)
+    return df
+
+
+def compute_energy_and_volume(df: pd.DataFrame):
+    """
+    Retorna energia_total_kwh, volume_total_m3 usando:
+    - energia_kwh: assume energia por amostra (já integrada)
+    - se não existir energia_kwh, mas existir potencia_kw: integra potencia_kw * dt_horas
+    - volume: integra vazao_m3h * dt_horas (robusto)
+    """
+    df = add_dt_hours(df)
+
+    # energia
+    if "energia_kwh" in df.columns:
+        energia_total = float(df["energia_kwh"].sum())
+        energia_series = df["energia_kwh"].astype(float)
+    elif "potencia_kw" in df.columns:
+        energia_series = df["potencia_kw"].astype(float) * df["dt_horas"].astype(float)
+        energia_total = float(energia_series.sum())
+    else:
+        energia_series = pd.Series([0.0] * len(df))
+        energia_total = 0.0
+
+    # volume (sempre integra)
+    if "vazao_m3h" in df.columns:
+        volume_series = df["vazao_m3h"].astype(float) * df["dt_horas"].astype(float)
+        volume_total = float(volume_series.sum())
+    else:
+        volume_series = pd.Series([0.0] * len(df))
+        volume_total = 0.0
+
+    return energia_total, volume_total, energia_series, volume_series, df
+
+
+def data_quality_metrics(df: pd.DataFrame) -> dict:
+    """
+    Métricas simples (auditáveis) de qualidade do dado — para escala.
+    """
+    df = df.copy()
+    n = len(df)
+
+    def pct_missing(col):
+        if col not in df.columns:
+            return 100.0
+        return float(df[col].isna().mean() * 100.0)
+
+    metrics = {
+        "n_registros": int(n),
+        "missing_timestamp_pct": pct_missing("timestamp"),
+        "missing_lamina_pct": pct_missing("lamina_cm"),
+        "missing_vazao_pct": pct_missing("vazao_m3h"),
+        "missing_energia_pct": pct_missing("energia_kwh"),
+        "missing_chuva_pct": pct_missing("chuva_mm"),
+        "missing_bomba_pct": pct_missing("bomba_ligada"),
+    }
+
+    if n >= 3 and "timestamp" in df.columns:
+        df2 = ensure_datetime_sorted(df)
+        df2 = add_dt_hours(df2)
+        metrics["dt_mediana_h"] = float(np.nanmedian(df2["dt_horas"].to_numpy()))
+        metrics["dt_max_h"] = float(np.nanmax(df2["dt_horas"].to_numpy()))
+    else:
+        metrics["dt_mediana_h"] = np.nan
+        metrics["dt_max_h"] = np.nan
+
+    # outliers simples (ex.: lâmina fora da faixa esperada do protótipo)
+    if "lamina_cm" in df.columns:
+        lam = df["lamina_cm"].astype(float)
+        metrics["lamina_outlier_pct"] = float(((lam < 0) | (lam > 25)).mean() * 100.0)
+    else:
+        metrics["lamina_outlier_pct"] = 0.0
+
+    return metrics
+
+
+# =========================================================
+# FUNÇÕES — geração e carga (com cache)
 # =========================================================
 def gerar_dados_exemplo(n_horas=240, seed=42):
-    """
-    Gera uma base sintética (frequência horária) para validação do pipeline do protótipo,
-    com variáveis típicas do domínio: lâmina d’água, vazão, energia, chuva e estado da bomba.
-    """
     rng = np.random.default_rng(seed)
     now = datetime.now().replace(minute=0, second=0, microsecond=0)
-    ts = pd.date_range(end=now, periods=n_horas, freq="H")
+    ts = pd.date_range(end=now, periods=n_horas, freq="h")  # freq="h" (recomendado)
 
     chuva = np.zeros(n_horas)
     for _ in range(10):
-        idx = rng.integers(0, n_horas)
-        dur = rng.integers(2, 8)
-        chuva[idx: idx + dur] += rng.uniform(1, 6)
+        idx = int(rng.integers(0, n_horas))
+        dur = int(rng.integers(2, 8))
+        chuva[idx: idx + dur] += float(rng.uniform(1, 6))
 
     bomba_ligada = (rng.random(n_horas) > 0.35).astype(int)
 
@@ -267,13 +387,13 @@ def gerar_dados_exemplo(n_horas=240, seed=42):
     )
 
 
-def carregar_dados():
+@st.cache_data(show_spinner=False)
+def carregar_dados_cached(csv_path: str, file_sig: str):
     """
-    Carrega dados reais (CSV) quando disponíveis. Caso não exista arquivo,
-    utiliza dados sintéticos para demonstrar as funcionalidades do protótipo.
+    Cache com assinatura (file_sig) para recarregar quando arquivo muda.
     """
-    if os.path.exists(DATA_CSV_PATH):
-        df = pd.read_csv(DATA_CSV_PATH)
+    if os.path.exists(csv_path):
+        df = pd.read_csv(csv_path)
 
         if "timestamp" in df.columns:
             df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -283,25 +403,38 @@ def carregar_dados():
                     df["timestamp"] = pd.to_datetime(df[c], errors="coerce")
                     break
 
-        df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+        df = ensure_datetime_sorted(df)
         return df
 
-    return gerar_dados_exemplo()
+    return ensure_datetime_sorted(gerar_dados_exemplo())
 
 
-def kpis_basicos(df):
-    total_energia = float(df["energia_kwh"].sum())
-    total_volume = float(df["vazao_m3h"].sum())
-    lamina_media = float(df["lamina_cm"].mean())
+def carregar_dados():
+    file_sig = "no_file"
+    if os.path.exists(DATA_CSV_PATH):
+        file_sig = str(os.path.getmtime(DATA_CSV_PATH))
+    return carregar_dados_cached(DATA_CSV_PATH, file_sig)
 
-    eficiencia = (total_energia / total_volume) if total_volume > 0 else None
-    horas_bomba = int(df["bomba_ligada"].sum())
-    chuva_24h = float(df[df["timestamp"] >= (df["timestamp"].max() - pd.Timedelta(hours=24))]["chuva_mm"].sum())
+
+# =========================================================
+# KPIs e recomendação (IA explicável)
+# =========================================================
+def kpis_basicos(df: pd.DataFrame):
+    df = ensure_datetime_sorted(df)
+    energia_total, volume_total, _, _, df_dt = compute_energy_and_volume(df)
+
+    lamina_media = float(df_dt["lamina_cm"].mean()) if "lamina_cm" in df_dt.columns else np.nan
+    horas_bomba = int(df_dt["bomba_ligada"].sum()) if "bomba_ligada" in df_dt.columns else 0
+
+    ult_24h = df_dt[df_dt["timestamp"] >= (df_dt["timestamp"].max() - pd.Timedelta(hours=24))]
+    chuva_24h = float(ult_24h["chuva_mm"].sum()) if "chuva_mm" in df_dt.columns else 0.0
+
+    eficiencia = (energia_total / volume_total) if volume_total > 0 else None
 
     return {
         "lamina_media": lamina_media,
-        "total_energia": total_energia,
-        "total_volume": total_volume,
+        "total_energia": energia_total,
+        "total_volume": volume_total,
         "eficiencia": eficiencia,
         "horas_bomba": horas_bomba,
         "chuva_24h": chuva_24h,
@@ -309,44 +442,42 @@ def kpis_basicos(df):
 
 
 def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool, dias_pos_floracao: int):
-    """
-    Motor de regras (IA explicável) para suporte à decisão no manejo da irrigação do arroz.
-    """
-    df = df.copy().sort_values("timestamp")
+    df = ensure_datetime_sorted(df)
     agora = df["timestamp"].max()
 
     ult_6h = df[df["timestamp"] >= (agora - pd.Timedelta(hours=6))]
     ult_24h = df[df["timestamp"] >= (agora - pd.Timedelta(hours=24))]
 
-    chuva_24h = float(ult_24h["chuva_mm"].sum())
-    lamina_atual = float(df.iloc[-1]["lamina_cm"])
-    bomba_atual = int(df.iloc[-1]["bomba_ligada"])
+    chuva_24h = float(ult_24h["chuva_mm"].sum()) if "chuva_mm" in df.columns else 0.0
+    lamina_atual = float(df.iloc[-1]["lamina_cm"]) if "lamina_cm" in df.columns else np.nan
+    bomba_atual = int(df.iloc[-1]["bomba_ligada"]) if "bomba_ligada" in df.columns else 0
 
-    # 6h
-    bomba_horas_6h = int(ult_6h["bomba_ligada"].sum())
-    energia_6h = float(ult_6h["energia_kwh"].sum())
-    volume_6h = float(ult_6h["vazao_m3h"].sum())
-    eficiencia_6h = (energia_6h / volume_6h) if volume_6h > 0 else None
+    # 6h (robusto com dt)
+    e6, v6, _, _, ult_6h_dt = compute_energy_and_volume(ult_6h) if len(ult_6h) else (0.0, 0.0, None, None, ult_6h)
+    eficiencia_6h = (e6 / v6) if v6 > 0 else None
+    bomba_horas_6h = int(ult_6h_dt["bomba_ligada"].sum()) if "bomba_ligada" in ult_6h_dt.columns else 0
 
     # 24h
-    bomba_horas_24h = int(ult_24h["bomba_ligada"].sum())
-    energia_24h = float(ult_24h["energia_kwh"].sum())
-    volume_24h = float(ult_24h["vazao_m3h"].sum())
-    eficiencia_24h = (energia_24h / volume_24h) if volume_24h > 0 else None
+    e24, v24, _, _, ult_24h_dt = compute_energy_and_volume(ult_24h) if len(ult_24h) else (0.0, 0.0, None, None, ult_24h)
+    eficiencia_24h = (e24 / v24) if v24 > 0 else None
+    bomba_horas_24h = int(ult_24h_dt["bomba_ligada"].sum()) if "bomba_ligada" in ult_24h_dt.columns else 0
 
-    lamina_min_24h = float(ult_24h["lamina_cm"].min()) if len(ult_24h) else np.nan
-    lamina_max_24h = float(ult_24h["lamina_cm"].max()) if len(ult_24h) else np.nan
+    lamina_min_24h = float(ult_24h["lamina_cm"].min()) if len(ult_24h) and "lamina_cm" in ult_24h.columns else np.nan
+    lamina_max_24h = float(ult_24h["lamina_cm"].max()) if len(ult_24h) and "lamina_cm" in ult_24h.columns else np.nan
 
     # baseline eficiência (histórico com bomba ligada)
-    df_ligada = df[df["bomba_ligada"] == 1]
     base_ef = None
-    if len(df_ligada) > 10 and float(df_ligada["vazao_m3h"].sum()) > 0:
-        base_ef = float(df_ligada["energia_kwh"].sum() / df_ligada["vazao_m3h"].sum())
+    if "bomba_ligada" in df.columns:
+        df_ligada = df[df["bomba_ligada"] == 1]
+        if len(df_ligada) > 10:
+            eb, vb, *_ = compute_energy_and_volume(df_ligada)
+            if vb > 0:
+                base_ef = float(eb / vb)
 
     mensagens = []
     nivel = "info"
 
-    # 1) chuva como crédito hídrico (heurística)
+    # 1) chuva como crédito hídrico
     if chuva_24h >= 12:
         mensagens.append(
             f"Chuva 24h = {chuva_24h:.1f} mm (≈ demanda diária média). "
@@ -373,49 +504,51 @@ def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool
             alvo_min, alvo_max = 5.0, 10.0
         elif fase == "Emborrachamento/Floração":
             alvo_min, alvo_max = 7.5, 10.0
-        else:  # Maturação
+        else:
             alvo_min, alvo_max = 2.5, 7.5
 
-    # reforço para manejo contínuo
     if manejo == "Contínuo" and not (risco_frio and fase == "Emborrachamento/Floração"):
         alvo_min, alvo_max = 6.5, 8.5
         mensagens.append("Manejo contínuo: referência operacional ~7,5 cm (faixa 6,5–8,5 cm).")
 
     # alertas por lâmina
-    if lamina_atual > 10.0 and not (risco_frio and fase == "Emborrachamento/Floração"):
-        mensagens.append(
-            f"Alerta: lâmina alta ({lamina_atual:.1f} cm). "
-            "Valores >10 cm podem aumentar perdas e risco de acamamento."
-        )
+    if np.isfinite(lamina_atual):
+        if lamina_atual > 10.0 and not (risco_frio and fase == "Emborrachamento/Floração"):
+            mensagens.append(
+                f"Alerta: lâmina alta ({lamina_atual:.1f} cm). "
+                "Valores >10 cm podem aumentar perdas e risco de acamamento."
+            )
+            nivel = "warning"
+
+        if lamina_atual < 2.5 and fase != "Maturação":
+            mensagens.append(
+                f"Atenção: lâmina muito baixa ({lamina_atual:.1f} cm). "
+                "Abaixo de ~2,5 cm exige controle operacional mais rigoroso."
+            )
+            nivel = "warning" if nivel != "error" else nivel
+
+        if lamina_atual < alvo_min:
+            mensagens.append(
+                f"Ação: lâmina abaixo do alvo da fase {fase} ({lamina_atual:.1f} < {alvo_min:.1f} cm). "
+                "Priorizar reposição."
+            )
+            nivel = "error"
+        elif lamina_atual > alvo_max:
+            mensagens.append(
+                f"Observação: lâmina acima do alvo da fase {fase} ({lamina_atual:.1f} > {alvo_max:.1f} cm). "
+                "Reduzir bombeamento e acompanhar."
+            )
+            nivel = "warning" if nivel != "error" else nivel
+        else:
+            mensagens.append(f"OK: lâmina dentro do alvo da fase {fase} ({alvo_min:.1f}–{alvo_max:.1f} cm).")
+            if nivel == "info":
+                nivel = "success"
+    else:
+        mensagens.append("Atenção: lâmina atual indisponível (dado ausente).")
         nivel = "warning"
 
-    if lamina_atual < 2.5 and fase != "Maturação":
-        mensagens.append(
-            f"Atenção: lâmina muito baixa ({lamina_atual:.1f} cm). "
-            "Abaixo de ~2,5 cm exige controle operacional mais rigoroso."
-        )
-        nivel = "warning" if nivel != "error" else nivel
-
-    # faixa-alvo por fase
-    if lamina_atual < alvo_min:
-        mensagens.append(
-            f"Ação: lâmina abaixo do alvo da fase {fase} ({lamina_atual:.1f} < {alvo_min:.1f} cm). "
-            "Priorizar reposição."
-        )
-        nivel = "error"
-    elif lamina_atual > alvo_max:
-        mensagens.append(
-            f"Observação: lâmina acima do alvo da fase {fase} ({lamina_atual:.1f} > {alvo_max:.1f} cm). "
-            "Reduzir bombeamento e acompanhar."
-        )
-        nivel = "warning" if nivel != "error" else nivel
-    else:
-        mensagens.append(f"OK: lâmina dentro do alvo da fase {fase} ({alvo_min:.1f}–{alvo_max:.1f} cm).")
-        if nivel == "info":
-            nivel = "success"
-
-    # 3) manejo intermitente (controle ON/OFF)
-    if manejo.startswith("Intermitente") and fase != "Maturação":
+    # 3) manejo intermitente (ON/OFF)
+    if manejo.startswith("Intermitente") and fase != "Maturação" and np.isfinite(lamina_atual):
         on_threshold = max(2.5, alvo_min)
         off_threshold = min(8.0, max(alvo_max, 7.0))
 
@@ -463,12 +596,12 @@ def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool
         "lamina_atual": lamina_atual,
         "chuva_24h": chuva_24h,
         "bomba_horas_6h": bomba_horas_6h,
-        "energia_6h": energia_6h,
-        "volume_6h": volume_6h,
+        "energia_6h": float(e6),
+        "volume_6h": float(v6),
         "eficiencia_6h": eficiencia_6h,
         "bomba_horas_24h": bomba_horas_24h,
-        "energia_24h": energia_24h,
-        "volume_24h": volume_24h,
+        "energia_24h": float(e24),
+        "volume_24h": float(v24),
         "eficiencia_24h": eficiencia_24h,
         "lamina_min_24h": lamina_min_24h,
         "lamina_max_24h": lamina_max_24h,
@@ -479,39 +612,79 @@ def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool
 
 
 # =========================================================
-# FUNÇÕES — RESULTADOS (baseline vs otimizado) + LOG CSV
+# RESULTADOS — baseline vs otimizado
 # =========================================================
 def aplicar_otimizacao_regras(df, lamina_max=9.5, chuva_min_mm=10.0):
     """
-    Simula um cenário otimizado simples:
+    Simula cenário otimizado simples:
     - Desliga a bomba quando chuva 24h >= chuva_min_mm OU lâmina >= lamina_max.
-    - Caso contrário, mantém o estado original.
+    Rolling 24h corrigido (sem desalinhamento).
     """
-    df = df.copy().sort_values("timestamp")
+    df = ensure_datetime_sorted(df)
 
-    # rolling por janela de 24h com índice datetime
-    s = df.set_index("timestamp")["chuva_mm"].rolling("24h").sum()
-    df["chuva_24h"] = s.reset_index(drop=True)
+    if "chuva_mm" in df.columns:
+        s = df.set_index("timestamp")["chuva_mm"].rolling("24h").sum()
+        df["chuva_24h"] = s.to_numpy()  # <-- sem reset_index(drop=True)
+    else:
+        df["chuva_24h"] = 0.0
 
-    cond_desliga = (df["chuva_24h"] >= chuva_min_mm) | (df["lamina_cm"] >= lamina_max)
+    cond_desliga = (df["chuva_24h"] >= float(chuva_min_mm))
+    if "lamina_cm" in df.columns:
+        cond_desliga = cond_desliga | (df["lamina_cm"] >= float(lamina_max))
 
-    df["bomba_otim"] = np.where(cond_desliga, 0, df["bomba_ligada"])
-    df["energia_otim_kwh"] = np.where(df["bomba_otim"] == 1, df["energia_kwh"], 0.0)
-    df["vazao_otim_m3h"] = np.where(df["bomba_otim"] == 1, df["vazao_m3h"], 0.0)
+    df["bomba_otim"] = np.where(cond_desliga, 0, df.get("bomba_ligada", 0))
+
+    # energia e vazão otimizadas (se bomba desligada => 0)
+    if "energia_kwh" in df.columns:
+        df["energia_otim_kwh"] = np.where(df["bomba_otim"] == 1, df["energia_kwh"].astype(float), 0.0)
+    elif "potencia_kw" in df.columns:
+        # energia derivada da potência e dt (depois integraremos)
+        df["potencia_otim_kw"] = np.where(df["bomba_otim"] == 1, df["potencia_kw"].astype(float), 0.0)
+    else:
+        df["energia_otim_kwh"] = 0.0
+
+    if "vazao_m3h" in df.columns:
+        df["vazao_otim_m3h"] = np.where(df["bomba_otim"] == 1, df["vazao_m3h"].astype(float), 0.0)
+    else:
+        df["vazao_otim_m3h"] = 0.0
 
     return df
 
 
 def comparar_cenarios(df, tarifa_kwh=DEFAULT_TARIFA):
-    energia_base = float(df["energia_kwh"].sum())
-    volume_base = float(df["vazao_m3h"].sum())
-    horas_bomba_base = int(df["bomba_ligada"].sum())
+    """
+    Cálculo robusto:
+    - volume_base = integral(vazao_m3h * dt_horas)
+    - energia_base = soma(energia_kwh) OU integral(potencia_kw * dt_horas)
+    Idem para o cenário otimizado.
+    """
+    df = ensure_datetime_sorted(df)
+
+    # base
+    energia_base, volume_base, _, _, df_dt = compute_energy_and_volume(df)
+    horas_bomba_base = int(df_dt["bomba_ligada"].sum()) if "bomba_ligada" in df_dt.columns else 0
     ef_base = (energia_base / volume_base) if volume_base > 0 else np.nan
     custo_base = energia_base * float(tarifa_kwh)
 
-    energia_otim = float(df["energia_otim_kwh"].sum())
-    volume_otim = float(df["vazao_otim_m3h"].sum())
-    horas_bomba_otim = int(df["bomba_otim"].sum())
+    # otimizado (energia/vazão otimizadas)
+    df_ot = df_dt.copy()
+    df_ot = add_dt_hours(df_ot)
+
+    # energia otimizada
+    if "energia_otim_kwh" in df_ot.columns:
+        energia_otim = float(df_ot["energia_otim_kwh"].sum())
+    elif "potencia_otim_kw" in df_ot.columns:
+        energia_otim = float((df_ot["potencia_otim_kw"].astype(float) * df_ot["dt_horas"].astype(float)).sum())
+    else:
+        energia_otim = 0.0
+
+    # volume otimizado
+    if "vazao_otim_m3h" in df_ot.columns:
+        volume_otim = float((df_ot["vazao_otim_m3h"].astype(float) * df_ot["dt_horas"].astype(float)).sum())
+    else:
+        volume_otim = 0.0
+
+    horas_bomba_otim = int(df_ot["bomba_otim"].sum()) if "bomba_otim" in df_ot.columns else 0
     ef_otim = (energia_otim / volume_otim) if volume_otim > 0 else np.nan
     custo_otim = energia_otim * float(tarifa_kwh)
 
@@ -536,12 +709,8 @@ def comparar_cenarios(df, tarifa_kwh=DEFAULT_TARIFA):
     }
 
 
-def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, chuva_min_mm: float, tarifa_kwh: float):
-    """
-    Salva uma linha de resultados baseline vs otimizado em CSV (evidência para o TCC).
-    """
+def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, chuva_min_mm: float, tarifa_kwh: float, username: str, evaluator: str):
     os.makedirs(LOG_DIR, exist_ok=True)
-
     ts = datetime.now().isoformat(timespec="seconds")
 
     row = {
@@ -550,6 +719,10 @@ def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, c
         "lamina_max_cm": float(lamina_max),
         "chuva_min_24h_mm": float(chuva_min_mm),
         "tarifa_rs_kwh": float(tarifa_kwh),
+        "user": username,
+        "evaluator": evaluator,
+        "app_version": APP_VERSION,
+        "run_id": RUN_ID,
 
         "energia_base_kwh": float(res.get("energia_base", 0.0)),
         "energia_otim_kwh": float(res.get("energia_otim", 0.0)),
@@ -571,7 +744,6 @@ def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, c
     }
 
     df_row = pd.DataFrame([row])
-
     if not os.path.exists(RES_LOG_PATH):
         df_row.to_csv(RES_LOG_PATH, index=False, encoding="utf-8")
     else:
@@ -581,17 +753,9 @@ def salvar_resultados_piloto(res: dict, periodo_label: str, lamina_max: float, c
 
 
 # =========================================================
-# FUNÇÕES — MODELO ECONÔMICO (value-based + cenários + VPL)
+# MODELO ECONÔMICO
 # =========================================================
-def calc_precificacao_por_valor(
-    economia_rs_mensal: float,
-    pct_captura: float = 0.15,
-    piso: float = 1200.0,
-    teto: float = 3800.0
-):
-    """
-    preço = economia_mensal * pct_captura, limitado por piso/teto.
-    """
+def calc_precificacao_por_valor(economia_rs_mensal: float, pct_captura: float = 0.15, piso: float = 1200.0, teto: float = 3800.0):
     if economia_rs_mensal is None or economia_rs_mensal <= 0:
         return 0.0
     preco = economia_rs_mensal * float(pct_captura)
@@ -600,9 +764,8 @@ def calc_precificacao_por_valor(
 
 def calc_roi_payback(preco_mensal: float, economia_rs_mensal: float, investimento_inicial: float):
     """
-    ROI mensal simples e payback em meses.
+    ROI do CLIENTE sobre a mensalidade do serviço:
     ROI = (economia - preço) / preço
-    Payback = investimento / (economia - preço)
     """
     if economia_rs_mensal <= 0 or preco_mensal <= 0:
         return {"roi_mensal": None, "payback_meses": None, "ganho_liquido": None}
@@ -622,19 +785,14 @@ def calc_roi_payback(preco_mensal: float, economia_rs_mensal: float, investiment
 
 
 def npv_anuidades(cf_anual: float, taxa: float, anos: int) -> float:
-    """
-    VPL de uma anuidade constante CF ao final de cada ano.
-    """
     if anos <= 0:
         return 0.0
     return sum(float(cf_anual) / ((1.0 + float(taxa)) ** t) for t in range(1, anos + 1))
 
 
-def calcular_cenarios_e_vpl(custo_base_periodo: float, alpha: float, taxa: float, anos: int):
+def calcular_cenarios_economia(custo_base_periodo: float, alpha: float):
     """
-    Usa custo_base_periodo (R$ do período selecionado) como referência e calcula:
-    - economia bruta, receita (alpha) e economia líquida, para r=5/10/15%.
-    - VPL 5 anos (projeto e produtor)
+    Apenas cenários de economia/receita (não calcula VPL aqui).
     """
     cenarios = [
         ("Conservador (5%)", 0.05),
@@ -644,16 +802,12 @@ def calcular_cenarios_e_vpl(custo_base_periodo: float, alpha: float, taxa: float
 
     rows = []
     for nome, r in cenarios:
-        econ_bruta = custo_base_periodo * r
-        receita = econ_bruta * alpha
+        econ_bruta = float(custo_base_periodo) * float(r)
+        receita = econ_bruta * float(alpha)
         econ_liq = econ_bruta - receita
-
-        # anualiza usando 12 meses equivalentes (assumindo 1 "período" ~ 1 mês)
-        # no seu caso, você está "mensalizando" economia via fator_mes fora daqui.
-        # Aqui calculamos VPL em cima de um CF anual que será passado pronto (fora).
         rows.append({
             "cenário": nome,
-            "r": r,
+            "r": float(r),
             "economia_bruta_rs": econ_bruta,
             "receita_servico_rs": receita,
             "economia_liquida_produtor_rs": econ_liq,
@@ -663,9 +817,6 @@ def calcular_cenarios_e_vpl(custo_base_periodo: float, alpha: float, taxa: float
 
 
 def salvar_cenarios_vpl_fenologia(df_row: pd.DataFrame):
-    """
-    Salva a tabela (cenários/VPL/fenologia) em CSV como evidência.
-    """
     os.makedirs(LOG_DIR, exist_ok=True)
     if not os.path.exists(ECO_CENARIOS_LOG_PATH):
         df_row.to_csv(ECO_CENARIOS_LOG_PATH, index=False, encoding="utf-8")
@@ -679,11 +830,13 @@ def salvar_cenarios_vpl_fenologia(df_row: pd.DataFrame):
 # =========================================================
 def bloco_contexto_tcc():
     st.markdown(
-        """
+        f"""
 **Contextualização (TCC):** Este dashboard demonstra a aplicação de *Business Intelligence* e *Data Science*
 no monitoramento da irrigação do arroz irrigado, com foco em eficiência hídrica e energética.
 Dados (sensores/SCADA/clima) são consolidados e transformados em KPIs, alertas e recomendações automatizadas,
 apoiando o manejo e a tomada de decisão.
+
+**Versão do protótipo:** {APP_VERSION} | **Execução:** {RUN_ID}
         """.strip()
     )
 
@@ -753,13 +906,18 @@ login_user = st.session_state.get("login_user", "usuario")
 st.title(APP_TITLE)
 st.caption(APP_SUBTITLE)
 st.markdown(f"**Avaliador:** {evaluator_name}")
-
 bloco_contexto_tcc()
 
 with st.sidebar:
     st.header("Sessão")
     st.caption(f"Usuário autenticado: **{login_user}**")
     st.caption(f"Avaliador: **{evaluator_name}**")
+    st.caption(f"Versão: **{APP_VERSION}** | Execução: **{RUN_ID}**")
+
+    # lembrete de segurança (protótipo)
+    user_ok, pass_ok, _ = get_settings()
+    if user_ok == "admin" and pass_ok == "admin":
+        st.warning("⚠️ Protótipo com credencial padrão (admin/admin). Em produção, use st.secrets/OAuth.")
 
     if st.button("Sair"):
         log_access_event("LOGOUT", login_user, evaluator_name)
@@ -810,10 +968,10 @@ tarifa_kwh = st.sidebar.number_input("Tarifa de energia (R$/kWh)", min_value=0.0
 lamina_max = st.sidebar.slider("Lâmina máxima (cm)", min_value=7.0, max_value=20.0, value=10.0, step=0.5)
 chuva_min_mm = st.sidebar.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=50.0, value=12.0, step=1.0)
 
-# modelo econômico (pedido do orientador)
+# modelo econômico
 st.sidebar.header("Modelo econômico (TCC)")
 pct_captura = st.sidebar.slider("Captura de valor (% da economia)", 5, 30, 20, 1) / 100.0
-alpha_receita = st.sidebar.slider("Receita do projeto (% da economia bruta)", 5, 30, int(DEFAULT_ALPHA_RECEITA*100), 1) / 100.0
+alpha_receita = st.sidebar.slider("Receita do projeto (% da economia bruta)", 5, 30, int(DEFAULT_ALPHA_RECEITA * 100), 1) / 100.0
 
 investimento_inicial = st.sidebar.number_input("Investimento inicial estimado (R$)", min_value=0.0, value=12400.0, step=100.0)
 horas_dia_ref = st.sidebar.number_input("Horas/dia referência (econômico)", min_value=0, max_value=24, value=DEFAULT_HORAS_DIA, step=1)
@@ -850,6 +1008,7 @@ for pth, label in [
     (RES_LOG_PATH, "Baixar resultados_piloto.csv"),
     (ECO_LOG_PATH, "Baixar modelo_economico.csv"),
     (ECO_CENARIOS_LOG_PATH, "Baixar cenarios_vpl_fenologia.csv"),
+    (DQ_LOG_PATH, "Baixar data_quality_log.csv"),
 ]:
     if os.path.exists(pth):
         with open(pth, "rb") as f:
@@ -875,6 +1034,7 @@ tabs = st.tabs([
     "Segmentação (TCC)",
     "MVP vs Visão Futura",
     "Escala & Gargalos",
+    "Qualidade do Dado (escala)",
 ])
 
 
@@ -885,7 +1045,7 @@ with tabs[0]:
     k = kpis_basicos(df_f)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Lâmina média (cm)", f"{k['lamina_media']:.2f}")
+    c1.metric("Lâmina média (cm)", f"{k['lamina_media']:.2f}" if np.isfinite(k["lamina_media"]) else "—")
     c2.metric("Energia total (kWh)", f"{k['total_energia']:.1f}")
     c3.metric("Volume total (m³)", f"{k['total_volume']:.1f}")
     c4.metric("Eficiência (kWh/m³)", f"{(k['eficiencia'] if k['eficiencia'] is not None else 0):.3f}")
@@ -902,7 +1062,7 @@ with tabs[0]:
     )
 
     # registra 1x por combinação + timestamp final do período
-    log_key = f"log_rec::{periodo}::{fase}::{manejo}::{tipo_solo}::{risco_frio}::{int(dias_pos_floracao)}::{df_f['timestamp'].max()}"
+    log_key = f"log_rec::{periodo}::{fase}::{manejo}::{tipo_solo}::{risco_frio}::{int(dias_pos_floracao)}::{df_f['timestamp'].max()}::{RUN_ID}"
     if st.session_state.get(log_key) is not True:
         log_recommendation_event(
             nivel=nivel,
@@ -947,11 +1107,22 @@ with tabs[0]:
 
     with cc1:
         st.caption("Lâmina d’água (cm)")
-        st.line_chart(df_f.set_index("timestamp")["lamina_cm"])
+        if "lamina_cm" in df_f.columns:
+            st.line_chart(df_f.set_index("timestamp")["lamina_cm"])
+        else:
+            st.info("Coluna lamina_cm não encontrada.")
 
     with cc2:
-        st.caption("Energia (kWh/h) e Vazão (m³/h)")
-        st.line_chart(df_f.set_index("timestamp")[["energia_kwh", "vazao_m3h"]])
+        st.caption("Energia (kWh) e Vazão (m³/h)")
+        cols = []
+        if "energia_kwh" in df_f.columns:
+            cols.append("energia_kwh")
+        if "vazao_m3h" in df_f.columns:
+            cols.append("vazao_m3h")
+        if cols:
+            st.line_chart(df_f.set_index("timestamp")[cols])
+        else:
+            st.info("Colunas de energia/vazão não encontradas.")
 
     st.subheader("Base de dados (amostra)")
     st.dataframe(df_f.tail(50), use_container_width=True)
@@ -962,7 +1133,6 @@ with tabs[0]:
 # =========================================================
 with tabs[1]:
     st.subheader("Arquitetura da Solução Proposta")
-
     st.write(
         "A solução é estruturada em camadas para viabilizar coleta contínua, armazenamento histórico, "
         "processamento analítico e visualização. Fluxo: "
@@ -991,7 +1161,6 @@ with tabs[1]:
 # =========================================================
 with tabs[2]:
     st.subheader("Metodologia (simulação)")
-
     st.markdown(
         """
 **1) Coleta/Geração de dados**
@@ -1000,7 +1169,7 @@ with tabs[2]:
 
 **2) Tratamento e organização**
 - Padronização, limpeza e ordenação temporal.
-- Consolidação histórica para análise.
+- Preparado para *intervalo irregular* via \(dt\\) (integração de volume/energia).
 
 **3) Indicadores (BI)**
 - KPIs operacionais e gráficos de tendência.
@@ -1008,6 +1177,9 @@ with tabs[2]:
 **4) Suporte à decisão (IA explicável)**
 - Regras interpretáveis para alertas e recomendações.
 - Estrutura preparada para evolução com modelos preditivos.
+
+**5) Evidências**
+- Logs em CSV com versão do app e ID de execução (auditoria).
         """.strip()
     )
 
@@ -1046,18 +1218,24 @@ with tabs[3]:
     )
 
     st.markdown("### Gráficos comparativos (energia e vazão)")
-    comp = pd.DataFrame(
-        {
-            "timestamp": df_sim["timestamp"],
-            "energia_base_kwh": df_sim["energia_kwh"],
-            "energia_otim_kwh": df_sim["energia_otim_kwh"],
-            "vazao_base_m3h": df_sim["vazao_m3h"],
-            "vazao_otim_m3h": df_sim["vazao_otim_m3h"],
-        }
-    ).set_index("timestamp")
+    comp = pd.DataFrame({"timestamp": df_sim["timestamp"]}).set_index("timestamp")
 
-    st.line_chart(comp[["energia_base_kwh", "energia_otim_kwh"]])
-    st.line_chart(comp[["vazao_base_m3h", "vazao_otim_m3h"]])
+    if "energia_kwh" in df_sim.columns:
+        comp["energia_base_kwh"] = df_sim["energia_kwh"]
+    if "energia_otim_kwh" in df_sim.columns:
+        comp["energia_otim_kwh"] = df_sim["energia_otim_kwh"]
+    if "vazao_m3h" in df_sim.columns:
+        comp["vazao_base_m3h"] = df_sim["vazao_m3h"]
+    if "vazao_otim_m3h" in df_sim.columns:
+        comp["vazao_otim_m3h"] = df_sim["vazao_otim_m3h"]
+
+    cols_e = [c for c in ["energia_base_kwh", "energia_otim_kwh"] if c in comp.columns]
+    cols_v = [c for c in ["vazao_base_m3h", "vazao_otim_m3h"] if c in comp.columns]
+
+    if cols_e:
+        st.line_chart(comp[cols_e])
+    if cols_v:
+        st.line_chart(comp[cols_v])
 
     st.markdown("### Evidência para o TCC (CSV)")
     if st.button("Salvar resultados desta simulação"):
@@ -1067,6 +1245,8 @@ with tabs[3]:
             lamina_max=lamina_max,
             chuva_min_mm=chuva_min_mm,
             tarifa_kwh=tarifa_kwh,
+            username=login_user,
+            evaluator=evaluator_name,
         )
         st.success(f"Resultados salvos em: {path}")
 
@@ -1077,20 +1257,19 @@ with tabs[3]:
 
 
 # =========================================================
-# TAB 4 — MODELO ECONÔMICO (com cenários, VPL, fenologia, gráficos)
+# TAB 4 — MODELO ECONÔMICO
 # =========================================================
 with tabs[4]:
     st.subheader("Modelo Econômico (TCC) — Economia → Cenários → VPL → Precificação")
 
-    # baseline vs otimizado no período
     df_sim = aplicar_otimizacao_regras(df_f, lamina_max=lamina_max, chuva_min_mm=chuva_min_mm)
     res = comparar_cenarios(df_sim, tarifa_kwh=tarifa_kwh)
 
     economia_periodo_rs = float(res["economia_rs"])
-    energia_periodo_kwh = float(res["economia_kwh"])
+    economia_periodo_kwh = float(res["economia_kwh"])
     custo_base_periodo_rs = float(res["custo_base"])
 
-    # fator para "mensalizar" a economia conforme período escolhido
+    # fator para “mensalizar” conforme período escolhido
     if periodo == "Últimas 24h":
         fator_mes = 30
         dias_periodo = 1
@@ -1105,13 +1284,11 @@ with tabs[4]:
         fator_mes = 30 / dias_periodo
 
     economia_mensal_rs = economia_periodo_rs * fator_mes
-    economia_mensal_kwh = energia_periodo_kwh * fator_mes
+    economia_mensal_kwh = economia_periodo_kwh * fator_mes
 
-    # economia na safra (dias de inundação contínua)
     economia_diaria_rs = economia_periodo_rs / dias_periodo
     economia_safra_rs = economia_diaria_rs * duracao_safra_dias
 
-    # precificação (value-based)
     preco_sugerido = calc_precificacao_por_valor(
         economia_rs_mensal=economia_mensal_rs,
         pct_captura=pct_captura,
@@ -1132,28 +1309,19 @@ with tabs[4]:
     c3.metric("Economia na safra (R$)", fmt_br_money(economia_safra_rs))
     c4.metric("Tarifa usada (R$/kWh)", f"{tarifa_kwh:.2f}".replace(".", ","))
 
-    st.markdown("### Precificação + ROI/Payback")
+    st.markdown("### Precificação + ROI/Payback (ROI do cliente sobre a mensalidade)")
     p1, p2, p3, p4 = st.columns(4)
     p1.metric("Preço sugerido (R$/mês)", fmt_br_money(preco_sugerido))
     p2.metric("ROI mensal (líquido)", f"{met['roi_mensal']*100:.1f}%" if met["roi_mensal"] is not None else "—")
     p3.metric("Ganho líquido (R$/mês)", fmt_br_money(met["ganho_liquido"]) if met["ganho_liquido"] is not None else "—")
-    if met["payback_meses"] is not None:
-        p4.metric("Payback (meses)", f"{met['payback_meses']:.1f}".replace(".", ","))
-    else:
-        p4.metric("Payback (meses)", "—")
+    p4.metric("Payback (meses)", f"{met['payback_meses']:.1f}".replace(".", ",") if met["payback_meses"] is not None else "—")
 
     st.divider()
 
-    # -------------------------
-    # CENÁRIOS 5/10/15% (usando custo_base_periodo como referência)
-    # -------------------------
+    # Cenários 5/10/15%
     st.markdown("### Cenários de economia (5% / 10% / 15%) sobre o custo base do período")
-    df_cen = calcular_cenarios_e_vpl(
-        custo_base_periodo=custo_base_periodo_rs,
-        alpha=alpha_receita,
-        taxa=taxa_desconto,
-        anos=horizonte_anos,
-    )
+    df_cen = calcular_cenarios_economia(custo_base_periodo=custo_base_periodo_rs, alpha=alpha_receita)
+
     df_cen_show = df_cen.copy()
     df_cen_show["r (%)"] = (df_cen_show["r"] * 100).round(1)
     df_cen_show["Economia bruta (R$)"] = df_cen_show["economia_bruta_rs"].round(2)
@@ -1168,13 +1336,9 @@ with tabs[4]:
 
     st.divider()
 
-    # -------------------------
-    # VPL 5 anos (usando anualização do período -> economia mensal -> anual)
-    # -------------------------
+    # VPL
     st.markdown("### VPL (Valor Presente Líquido) — horizonte e taxa definidos")
-    # CF anual (aprox.): economia_mensal * 12; receita anual = alpha * economia_bruta anual
-    # Aqui usamos economia BRUTA anual por cenário, derivada do custo_base_periodo mensalizado.
-    # Estratégia: pegar custo_base_periodo e mensalizar também.
+
     custo_base_mensal = custo_base_periodo_rs * fator_mes
     custo_base_anual = custo_base_mensal * 12
 
@@ -1218,16 +1382,10 @@ with tabs[4]:
 
     st.divider()
 
-    # -------------------------
-    # Fenologia: r variável por fase (usando custo_base_periodo como referência)
-    # -------------------------
+    # Fenologia: r variável
     st.markdown("### Redução variável por fase fenológica (r por fase) — estimativa de economia bruta")
-    r_por_fase = {
-        "Vegetativa": r_veg,
-        "Reprodutiva": r_rep,
-        "Emborrachamento/Floração": r_flo,
-        "Maturação": r_mat,
-    }
+    r_por_fase = {"Vegetativa": r_veg, "Reprodutiva": r_rep, "Emborrachamento/Floração": r_flo, "Maturação": r_mat}
+
     df_fen = pd.DataFrame([
         {"fase": "Vegetativa", "r": r_veg},
         {"fase": "Reprodutiva", "r": r_rep},
@@ -1253,9 +1411,7 @@ with tabs[4]:
 
     st.divider()
 
-    # -------------------------
-    # Evidências exportáveis (JSON + CSV)
-    # -------------------------
+    # Evidências exportáveis
     st.markdown("### Evidência exportável (para anexar no TCC)")
     evidencia = {
         "periodo": periodo,
@@ -1263,28 +1419,25 @@ with tabs[4]:
         "horas_dia_ref": int(horas_dia_ref),
         "lamina_max_cm": float(lamina_max),
         "chuva_min_24h_mm": float(chuva_min_mm),
-
         "custo_base_periodo_rs": float(custo_base_periodo_rs),
         "economia_periodo_rs": float(economia_periodo_rs),
         "economia_mensal_rs_estim": float(economia_mensal_rs),
         "economia_safra_dias": int(duracao_safra_dias),
         "economia_safra_rs_estim": float(economia_safra_rs),
-
         "pct_captura_value_based": float(pct_captura),
         "alpha_receita_projeto": float(alpha_receita),
         "preco_sugerido_rs_mensal": float(preco_sugerido),
         "investimento_inicial_rs": float(investimento_inicial),
-
         "roi_mensal": met["roi_mensal"],
         "payback_meses": met["payback_meses"],
-
         "taxa_desconto_aa": float(taxa_desconto),
         "horizonte_anos": int(horizonte_anos),
-
         "r_fase_vegetativa": float(r_veg),
         "r_fase_reprodutiva": float(r_rep),
         "r_fase_emborrachamento_floracao": float(r_flo),
         "r_fase_maturacao": float(r_mat),
+        "app_version": APP_VERSION,
+        "run_id": RUN_ID,
     }
     st.json(evidencia)
 
@@ -1303,9 +1456,7 @@ with tabs[4]:
         st.success(f"Modelo econômico salvo em: {ECO_LOG_PATH}")
 
     if st.button("Salvar tabela de cenários/VPL/fenologia (CSV)"):
-        # consolida (cenários + vpl + fenologia) numa linha por cenário e adiciona timestamp
         ts = datetime.now().isoformat(timespec="seconds")
-
         df_out = df_vpl[["cenário", "r", "vpl_projeto_rs", "vpl_produtor_rs"]].copy()
         df_out["timestamp_execucao"] = ts
         df_out["user"] = login_user
@@ -1320,6 +1471,8 @@ with tabs[4]:
         df_out["r_fase_rep"] = float(r_rep)
         df_out["r_fase_flo"] = float(r_flo)
         df_out["r_fase_mat"] = float(r_mat)
+        df_out["app_version"] = APP_VERSION
+        df_out["run_id"] = RUN_ID
 
         path = salvar_cenarios_vpl_fenologia(df_out)
         st.success(f"Tabela salva em: {path}")
@@ -1335,7 +1488,6 @@ with tabs[4]:
 # =========================================================
 with tabs[5]:
     st.subheader("Modelo Matemático Formal (equações) — versão para o TCC")
-
     st.markdown(
         r"""
 ### Variáveis
@@ -1382,19 +1534,16 @@ No protótipo:
 - \(CF_{prod} = S_{liq,anual}\)
         """.strip()
     )
-
     st.info(
-        "Essa seção é excelente para anexar no TCC: deixa explícito que o protótipo é mensurável e auditável, "
-        "mesmo sendo um MVP (regras interpretáveis)."
+        "Seção indicada para o TCC: evidencia mensuração/auditoria do protótipo (mesmo sendo MVP por regras)."
     )
 
 
 # =========================================================
-# TAB 6 — SEGMENTAÇÃO (TCC)
+# TAB 6 — SEGMENTAÇÃO
 # =========================================================
 with tabs[6]:
     st.subheader("Segmentação (TCC) — Priorização do Cliente Inicial")
-
     st.markdown(
         """
 **Segmento prioritário (beachhead):**
@@ -1466,3 +1615,36 @@ with tabs[8]:
 - Priorização de nicho inicial com infraestrutura já instalada.
         """.strip()
     )
+
+
+# =========================================================
+# TAB 9 — QUALIDADE DO DADO (ESCALA)
+# =========================================================
+with tabs[9]:
+    st.subheader("Qualidade do Dado (escala) — validação automática")
+    st.caption("Métricas simples e auditáveis para apoiar a escalabilidade (sensores, SCADA e integridade temporal).")
+
+    dq = data_quality_metrics(df_f)
+    st.json(dq)
+
+    st.markdown("### Interpretação rápida")
+    colA, colB, colC, colD = st.columns(4)
+    colA.metric("Registros", dq["n_registros"])
+    colB.metric("Missing lâmina (%)", f"{dq['missing_lamina_pct']:.1f}%")
+    colC.metric("Missing energia (%)", f"{dq['missing_energia_pct']:.1f}%")
+    colD.metric("dt mediana (h)", f"{dq['dt_mediana_h']:.2f}" if np.isfinite(dq["dt_mediana_h"]) else "—")
+
+    st.markdown("### Evidência (CSV)")
+    if st.button("Salvar qualidade do dado (CSV)"):
+        path = log_data_quality_event(
+            username=login_user,
+            evaluator=evaluator_name,
+            periodo_label=periodo,
+            metrics=dq,
+        )
+        st.success(f"Qualidade do dado salva em: {path}")
+
+    if os.path.exists(DQ_LOG_PATH):
+        st.caption("Histórico (data_quality_log.csv) — últimas 20 linhas:")
+        hist_dq = pd.read_csv(DQ_LOG_PATH)
+        st.dataframe(hist_dq.tail(20), use_container_width=True)
