@@ -1820,11 +1820,11 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("Modelo Econômico (TCC) — Economia → Cenários → VPL → Precificação → Unit Economics")
 
-    # Texto acadêmico (o que você pediu “acima”)
-    with st.expander("📘 Texto para colar no TCC (Unit Economics + Break-even + Captura de Valor)", expanded=False):
+    
+    with st.expander("(Unit Economics + Break-even + Captura de Valor)", expanded=False):
         st.markdown(
             r"""
-### 4.X.X Análise de Unit Economics e Ponto de Equilíbrio
+### Análise de Unit Economics e Ponto de Equilíbrio
 
 A sustentabilidade financeira do AgroData foi avaliada por meio da análise de *unit economics*, considerando a relação entre preço, custos variáveis por cliente e custos fixos operacionais.
 
