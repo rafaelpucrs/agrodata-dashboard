@@ -1,42 +1,3 @@
-# =========================================================
-# AgroData — Irrigação (BI + Data Science + IA)
-# Protótipo acadêmico (TCC) — Versão completa (reescrita e consolidada)
-#
-# ✅ Login + logs (RUN_ID + APP_VERSION) + auditoria (CSV)
-# ✅ Suporte multi-UC (6 UCs do piloto) + "Modo Avaliador" (1 clique)
-# ✅ Simulação realista 90 dias:
-#    - chuva por eventos
-#    - ET0 proxy
-#    - lâmina dinâmica (balanço hídrico simplificado)
-#    - operação de bomba por horário (evitar ponta opcional)
-#    - energia_kwh por intervalo (compatível com acumulada)
-# ✅ Intervalo irregular (dt_horas) + integração robusta (energia/volume)
-# ✅ KPIs (BI) + recomendações explicáveis (regras)
-# ✅ Rolling 24h sem desalinhamento
-# ✅ Baseline vs Otimizado
-# ✅ Tarifa fixa OU horo-sazonal (ponta/fora-ponta) + evidência
-# ✅ Modelo econômico completo (TCC):
-#    - Cenários (5% / 10% / 15%)
-#    - VPL (horizonte)
-#    - Redução variável por fase fenológica
-#    - Precificação (captura de valor)
-#    - ROI/Payback (cliente)
-#    - Unit Economics + Break-even (clientes) + Payback CAPEX do projeto
-#    - Gráficos (PNG) + downloads
-# ✅ Qualidade de dado (escala) + evidências (CSV)
-# ✅ Cache de carregamento
-#
-# Estrutura recomendada:
-# - app.py (este arquivo)
-# - data/dados_irrigacao.csv (opcional)
-# - data/arquitetura_irrigacao.png (opcional)
-# - logs/ (gerado automaticamente)
-#
-# Observação:
-# - Fallback admin/admin é somente para protótipo acadêmico.
-# - Para produção: st.secrets, OAuth/SSO, BD, etc.
-# =========================================================
-
 import os
 import io
 import hmac
@@ -49,16 +10,16 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 
-# =========================================================
+
 # CONFIG
-# =========================================================
+
 st.set_page_config(page_title="AgroData — Irrigação", layout="wide")
 
 
-# =========================================================
-# CONSTANTES / PATHS
-# =========================================================
-APP_VERSION = "1.0.1"
+
+# CONSTANTES
+
+APP_VERSION = "1.0.2"
 APP_TITLE = "AgroData — Irrigação (BI + Data Science + IA)"
 APP_SUBTITLE = (
     "Protótipo acadêmico para o TCC: monitoramento operacional da irrigação com KPIs, "
@@ -105,22 +66,19 @@ DEFAULT_N_DIAS = 90
 DEFAULT_UCS = ["UC01", "UC02", "UC03", "UC04", "UC05", "UC06"]
 
 
-# =========================================================
+
 # SESSÃO — ID de execução (evidência)
-# =========================================================
+
 if "run_id" not in st.session_state:
     st.session_state["run_id"] = str(uuid.uuid4())[:8]
 RUN_ID = st.session_state["run_id"]
 
 
-# =========================================================
-# UTIL: Credenciais + Nome do Avaliador
-# =========================================================
+
+# UTIL: Credenciais 
+
 def get_settings():
-    """
-    Lê configurações via st.secrets (produção) ou variáveis de ambiente (local).
-    Observação: fallback admin/admin é apenas para protótipo acadêmico.
-    """
+
     app_user = str(st.secrets.get("APP_USER", os.getenv("APP_USER", "admin")))
     app_pass = str(st.secrets.get("APP_PASSWORD", os.getenv("APP_PASSWORD", "admin")))
     evaluator = str(st.secrets.get("APP_EVALUATOR_NAME", os.getenv("APP_EVALUATOR_NAME", "Avaliador")))
@@ -302,9 +260,9 @@ if not check_login():
     st.stop()
 
 
-# =========================================================
-# DADOS — helpers para dt e integração (intervalo irregular)
-# =========================================================
+
+# DADOS —
+
 def ensure_datetime_sorted(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -429,9 +387,9 @@ def data_quality_metrics(df: pd.DataFrame) -> dict:
     return metrics
 
 
-# =========================================================
+
 # SIMULAÇÃO REALISTA (90 dias) + Multi-UC
-# =========================================================
+
 def _sim_rain_events(rng: np.random.Generator, n_horas: int) -> np.ndarray:
     chuva = np.zeros(n_horas, dtype=float)
     n_eventos = int(rng.integers(10, 20))
@@ -586,9 +544,9 @@ def carregar_dados(usar_simulacao: bool, seed: int, n_dias: int, evitar_ponta: b
     return carregar_dados_cached(DATA_CSV_PATH, file_sig, usar_simulacao, seed, n_dias, evitar_ponta, ponta_inicio, ponta_fim)
 
 
-# =========================================================
+
 # TARIFA HORO-SAZONAL (PONTA/FP) + CUSTOS
-# =========================================================
+
 def add_tarifa_horaria(df: pd.DataFrame, tarifa_fp: float, tarifa_ponta: float, ponta_inicio: int, ponta_fim: int) -> pd.DataFrame:
     df = df.copy()
     h = df["timestamp"].dt.hour
@@ -620,9 +578,9 @@ def calc_custo_energia(df: pd.DataFrame, usar_variavel: bool, tarifa_kwh_fixa: f
     return custo_total, custo_ponta, custo_fp
 
 
-# =========================================================
+
 # KPIs (BI)
-# =========================================================
+
 def kpis_basicos(df: pd.DataFrame):
     df = ensure_datetime_sorted(df)
     energia_total_kwh, volume_total_m3, _, _, df_dt = compute_energy_and_volume(df)
@@ -654,9 +612,9 @@ def kpis_basicos(df: pd.DataFrame):
     }
 
 
-# =========================================================
+
 # RECOMENDAÇÃO (IA EXPLICÁVEL por regras)
-# =========================================================
+
 def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool, dias_pos_floracao: int):
     df = ensure_datetime_sorted(df)
     agora = df["timestamp"].max()
@@ -810,9 +768,9 @@ def recomendacao_ia(df, fase: str, manejo: str, tipo_solo: str, risco_frio: bool
     return nivel, mensagens, meta
 
 
-# =========================================================
+
 # RESULTADOS — baseline vs otimizado + tarifa fixa/variável
-# =========================================================
+
 def aplicar_otimizacao_regras(
     df,
     lamina_max=9.5,
@@ -1018,9 +976,9 @@ def salvar_resultados_piloto(
     return RES_LOG_PATH
 
 
-# =========================================================
+
 # MODO AVALIADOR (1 clique) — relatório por UC + PNGs
-# =========================================================
+
 def relatorio_avaliador_por_uc(
     df_all: pd.DataFrame,
     periodo_label: str,
@@ -1157,9 +1115,9 @@ def relatorio_avaliador_por_uc(
     return csv_path, png_rs_path, png_kwh_path
 
 
-# =========================================================
+
 # MODELO ECONÔMICO + UNIT ECONOMICS + BREAK-EVEN
-# =========================================================
+
 def calc_precificacao_por_valor(economia_rs_mensal: float, pct_captura: float = 0.15, piso: float = 1200.0, teto: float = 3800.0):
     """
     P = min(max(E_mensal * pct_captura, piso), teto)
@@ -1238,6 +1196,7 @@ def unit_economics_break_even(
     opex_mensal: float,
     n_clientes: int,
     capex_inicial: float,
+
 ):
     """
     Unit economics (SaaS):
@@ -1282,9 +1241,9 @@ def unit_economics_break_even(
     }
 
 
-# =========================================================
+# 
 # UI HELPERS
-# =========================================================
+# 
 def bloco_contexto_tcc():
     st.markdown(
         f"""
@@ -1362,9 +1321,9 @@ def plot_fenologia_bar(df_fen: pd.DataFrame, title: str):
     return fig
 
 
-# =========================================================
+
 # UI — TOPO + SIDEBAR (Sair)
-# =========================================================
+
 evaluator_name = st.session_state.get("evaluator_name", "Avaliador")
 login_user = st.session_state.get("login_user", "usuario")
 
@@ -1392,25 +1351,29 @@ with st.sidebar:
         st.rerun()
 
 
-# =========================================================
-# APP — dados + filtros
-# =========================================================
-st.sidebar.header("Fonte de dados")
+
+
+# APP — dados + filtros + interface em 6 abas
+
+
+
+# Sidebar limpa: somente filtros principais visíveis
+st.sidebar.header("Filtros principais")
+
 usar_simulacao = st.sidebar.toggle("Usar simulação realista (90 dias / 6 UCs)", value=True)
 seed = st.sidebar.number_input("Seed simulação", min_value=1, value=42, step=1)
 n_dias = st.sidebar.number_input("Dias simulados", min_value=30, max_value=180, value=DEFAULT_N_DIAS, step=5)
 
-st.sidebar.subheader("Tarifa (energia)")
-usar_tarifa_variavel = st.sidebar.toggle("Usar tarifa horo-sazonal (ponta/fora-ponta)", value=True)
-tarifa_kwh_fixa = st.sidebar.number_input("Tarifa fixa (R$/kWh)", min_value=0.0, value=float(DEFAULT_TARIFA_FIXA), step=0.01)
+with st.sidebar.expander("⚙️ Tarifa de energia", expanded=False):
+    usar_tarifa_variavel = st.toggle("Usar tarifa horo-sazonal (ponta/fora-ponta)", value=True)
+    tarifa_kwh_fixa = st.number_input("Tarifa fixa (R$/kWh)", min_value=0.0, value=float(DEFAULT_TARIFA_FIXA), step=0.01)
+    tarifa_fp = st.number_input("Tarifa fora-ponta (R$/kWh)", min_value=0.0, value=float(DEFAULT_TARIFA_FP), step=0.01)
+    tarifa_ponta = st.number_input("Tarifa ponta (R$/kWh)", min_value=0.0, value=float(DEFAULT_TARIFA_PONTA), step=0.01)
+    ponta_inicio = st.number_input("Início ponta (hora)", min_value=0, max_value=23, value=int(DEFAULT_PONTA_INICIO), step=1)
+    ponta_fim = st.number_input("Fim ponta (hora)", min_value=1, max_value=24, value=int(DEFAULT_PONTA_FIM), step=1)
+    evitar_ponta_sim = st.toggle("Simulação baseline evita ponta", value=True)
 
-tarifa_fp = st.sidebar.number_input("Tarifa fora-ponta (R$/kWh)", min_value=0.0, value=float(DEFAULT_TARIFA_FP), step=0.01)
-tarifa_ponta = st.sidebar.number_input("Tarifa ponta (R$/kWh)", min_value=0.0, value=float(DEFAULT_TARIFA_PONTA), step=0.01)
-ponta_inicio = st.sidebar.number_input("Início ponta (hora)", min_value=0, max_value=23, value=int(DEFAULT_PONTA_INICIO), step=1)
-ponta_fim = st.sidebar.number_input("Fim ponta (hora)", min_value=1, max_value=24, value=int(DEFAULT_PONTA_FIM), step=1)
-
-evitar_ponta_sim = st.sidebar.toggle("Simulação baseline evita ponta (realista)", value=True)
-
+# Carrega dados após parâmetros básicos e tarifa
 df_all = carregar_dados(
     usar_simulacao=bool(usar_simulacao),
     seed=int(seed),
@@ -1420,125 +1383,64 @@ df_all = carregar_dados(
     ponta_fim=int(ponta_fim),
 )
 
-st.sidebar.header("Filtros")
-uc_id = st.sidebar.selectbox("UC (piloto)", sorted(df_all["uc_id"].astype(str).unique().tolist()))
-df_uc = df_all[df_all["uc_id"].astype(str) == str(uc_id)].copy()
-df_uc = ensure_datetime_sorted(df_uc)
-df_uc = ajustar_energia_se_acumulada(df_uc, "energia_kwh")
-max_data = df_uc["timestamp"].max()
-
+uc_id = st.sidebar.selectbox("UC monitorada", sorted(df_all["uc_id"].astype(str).unique().tolist()))
 periodo = st.sidebar.selectbox(
     "Período",
     options=["Últimas 24h", "Últimos 3 dias", "Últimos 7 dias", "Últimos 30 dias", "Tudo"],
     index=3,
 )
 
-st.sidebar.header("Parâmetros agronômicos (arroz)")
-fase = st.sidebar.selectbox(
-    "Fase do cultivo",
-    ["Vegetativa", "Reprodutiva", "Emborrachamento/Floração", "Maturação"],
-    index=0,
-)
-manejo = st.sidebar.selectbox(
-    "Manejo de irrigação",
-    ["Contínuo", "Intermitente (fornecimento intermitente)"],
-    index=0,
-)
-tipo_solo = st.sidebar.selectbox(
-    "Tipo de solo (supressão)",
-    ["Argiloso", "Arenoso/bem drenado"],
-    index=0,
-)
-risco_frio = st.sidebar.checkbox("Risco de frio (<16°C) no emborrachamento?", value=False)
-dias_pos_floracao = st.sidebar.number_input("Dias após floração plena", min_value=0, value=0, step=1)
-
-st.sidebar.header("Parâmetros (otimização)")
-lamina_max = st.sidebar.slider("Lâmina máxima (cm)", min_value=7.0, max_value=20.0, value=10.0, step=0.5)
-chuva_min_mm = st.sidebar.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=60.0, value=12.0, step=1.0)
-evitar_ponta_otim = st.sidebar.toggle("Otimização: evitar operar na ponta", value=True)
-
-# Modelo econômico (TCC)
-st.sidebar.header("Modelo econômico (TCC)")
-pct_captura = st.sidebar.slider("Captura de valor (% da economia)", 5, 30, int(DEFAULT_PCT_CAPTURA * 100), 1) / 100.0
-alpha_receita = st.sidebar.slider("Receita do projeto (% da economia bruta)", 5, 30, int(DEFAULT_ALPHA_RECEITA * 100), 1) / 100.0
-investimento_inicial_cliente = st.sidebar.number_input("Investimento inicial (cliente) (R$)", min_value=0.0, value=12400.0, step=100.0)
-
-st.sidebar.subheader("Safra (irrigação contínua)")
-duracao_safra_dias = st.sidebar.slider("Duração da lâmina contínua (dias)", 80, 120, 90, 1)
-piso_plano = st.sidebar.number_input("Piso do plano (R$/mês)", min_value=0.0, value=1200.0, step=100.0)
-teto_plano = st.sidebar.number_input("Teto do plano (R$/mês)", min_value=0.0, value=3800.0, step=100.0)
-
-st.sidebar.subheader("VPL")
-taxa_desconto = st.sidebar.number_input("Taxa de desconto (a.a.)", min_value=0.0, value=float(DEFAULT_TAXA_DESCONTO), step=0.01)
-horizonte_anos = st.sidebar.number_input("Horizonte (anos)", min_value=1, value=int(DEFAULT_HORIZONTE_ANOS), step=1)
-
-st.sidebar.subheader("Fenologia: redução variável r (%) por fase")
-r_veg = st.sidebar.number_input("Vegetativa r (%)", min_value=0.0, max_value=30.0, value=6.0, step=0.5) / 100.0
-r_rep = st.sidebar.number_input("Reprodutiva r (%)", min_value=0.0, max_value=30.0, value=10.0, step=0.5) / 100.0
-r_flo = st.sidebar.number_input("Emborrachamento/Floração r (%)", min_value=0.0, max_value=30.0, value=14.0, step=0.5) / 100.0
-r_mat = st.sidebar.number_input("Maturação r (%)", min_value=0.0, max_value=30.0, value=3.0, step=0.5) / 100.0
-
-st.sidebar.subheader("Unit Economics (SaaS do projeto)")
-opex_mensal = st.sidebar.number_input("OPEX mensal (custos fixos) (R$)", min_value=0.0, value=float(DEFAULT_OPEX_MENSAL), step=500.0)
-cv_por_cliente = st.sidebar.number_input("Custo variável por cliente/mês (R$)", min_value=0.0, value=float(DEFAULT_CV_POR_CLIENTE), step=10.0)
-overhead_pct = st.sidebar.slider("Overhead (% sobre preço)", 0, 30, int(DEFAULT_OVERHEAD_PCT * 100), 1) / 100.0
-n_clientes = st.sidebar.number_input("Clientes ativos (N)", min_value=0, value=int(DEFAULT_N_CLIENTES), step=1)
-capex_inicial_projeto = st.sidebar.number_input("CAPEX inicial do projeto (R$)", min_value=0.0, value=35000.0, step=500.0)
-
-# Evidências / logs
-st.sidebar.header("Evidências (logs)")
-colL, colR = st.sidebar.columns(2)
-with colL:
-    if st.button("Limpar logs"):
-        removed = clear_logs()
-        if removed:
-            st.success("Logs removidos: " + ", ".join(removed))
-        else:
-            st.info("Nenhum log para remover.")
-
-for pth, label in [
-    (ACCESS_LOG_PATH, "Baixar access_log.csv"),
-    (REC_LOG_PATH, "Baixar recommendations_log.csv"),
-    (RES_LOG_PATH, "Baixar resultados_piloto.csv"),
-    (ECO_LOG_PATH, "Baixar modelo_economico.csv"),
-    (ECO_CENARIOS_LOG_PATH, "Baixar cenarios_vpl_fenologia.csv"),
-    (DQ_LOG_PATH, "Baixar data_quality_log.csv"),
-]:
-    if os.path.exists(pth):
-        with open(pth, "rb") as f:
-            st.sidebar.download_button(label, data=f, file_name=os.path.basename(pth), mime="text/csv")
-
-st.sidebar.divider()
-st.sidebar.header("Modo Avaliador (1 clique)")
-salvar_detalhe_uc = st.sidebar.checkbox("Salvar detalhe por UC (CSV grande)", value=False)
-
-if st.sidebar.button("Gerar relatório por UC"):
-    csv_path, png_rs_path, png_kwh_path = relatorio_avaliador_por_uc(
-        df_all=df_all,
-        periodo_label=periodo,
-        lamina_max=lamina_max,
-        chuva_min_mm=chuva_min_mm,
-        usar_tarifa_variavel=usar_tarifa_variavel,
-        tarifa_kwh_fixa=tarifa_kwh_fixa,
-        tarifa_fp=tarifa_fp,
-        tarifa_ponta=tarifa_ponta,
-        ponta_inicio=int(ponta_inicio),
-        ponta_fim=int(ponta_fim),
-        evitar_ponta=evitar_ponta_otim,
-        salvar_detalhe_por_uc=salvar_detalhe_uc,
+with st.sidebar.expander(" Parâmetros agronômicos", expanded=False):
+    fase = st.selectbox(
+        "Fase do cultivo",
+        ["Vegetativa", "Reprodutiva", "Emborrachamento/Floração", "Maturação"],
+        index=0,
     )
-    st.sidebar.success("Relatório gerado!")
-    with open(csv_path, "rb") as f:
-        st.sidebar.download_button("Baixar relatório (CSV)", data=f, file_name=os.path.basename(csv_path), mime="text/csv")
-    if os.path.exists(png_rs_path):
-        with open(png_rs_path, "rb") as f:
-            st.sidebar.download_button("Baixar gráfico (PNG) — R$", data=f, file_name=os.path.basename(png_rs_path), mime="image/png")
-    if os.path.exists(png_kwh_path):
-        with open(png_kwh_path, "rb") as f:
-            st.sidebar.download_button("Baixar gráfico (PNG) — kWh", data=f, file_name=os.path.basename(png_kwh_path), mime="image/png")
+    manejo = st.selectbox(
+        "Manejo de irrigação",
+        ["Contínuo", "Intermitente (fornecimento intermitente)"],
+        index=0,
+    )
+    tipo_solo = st.selectbox("Tipo de solo", ["Argiloso", "Arenoso/bem drenado"], index=0)
+    risco_frio = st.checkbox("Risco de frio (<16°C) no emborrachamento?", value=False)
+    dias_pos_floracao = st.number_input("Dias após floração plena", min_value=0, value=0, step=1)
+
+with st.sidebar.expander("Otimização", expanded=False):
+    lamina_max = st.slider("Lâmina máxima (cm)", min_value=7.0, max_value=20.0, value=10.0, step=0.5)
+    chuva_min_mm = st.slider("Chuva 24h (mm) para reduzir/adiar", min_value=0.0, max_value=60.0, value=12.0, step=1.0)
+    evitar_ponta_otim = st.toggle("Otimização: evitar operar na ponta", value=True)
+
+with st.sidebar.expander("Modelo econômico", expanded=False):
+    pct_captura = st.slider("Captura de valor (% da economia)", 5, 30, int(DEFAULT_PCT_CAPTURA * 100), 1) / 100.0
+    alpha_receita = st.slider("Receita do projeto (% da economia bruta)", 5, 30, int(DEFAULT_ALPHA_RECEITA * 100), 1) / 100.0
+    investimento_inicial_cliente = st.number_input("Investimento inicial do cliente (R$)", min_value=0.0, value=12400.0, step=100.0)
+    duracao_safra_dias = st.slider("Duração da lâmina contínua (dias)", 80, 120, 90, 1)
+    piso_plano = st.number_input("Piso do plano (R$/mês)", min_value=0.0, value=1200.0, step=100.0)
+    teto_plano = st.number_input("Teto do plano (R$/mês)", min_value=0.0, value=3800.0, step=100.0)
+    taxa_desconto = st.number_input("Taxa de desconto (a.a.)", min_value=0.0, value=float(DEFAULT_TAXA_DESCONTO), step=0.01)
+    horizonte_anos = st.number_input("Horizonte (anos)", min_value=1, value=int(DEFAULT_HORIZONTE_ANOS), step=1)
+
+    st.caption("Redução variável por fase fenológica")
+    r_veg = st.number_input("Vegetativa r (%)", min_value=0.0, max_value=30.0, value=6.0, step=0.5) / 100.0
+    r_rep = st.number_input("Reprodutiva r (%)", min_value=0.0, max_value=30.0, value=10.0, step=0.5) / 100.0
+    r_flo = st.number_input("Emborrachamento/Floração r (%)", min_value=0.0, max_value=30.0, value=12.0, step=0.5) / 100.0
+    r_mat = st.number_input("Maturação r (%)", min_value=0.0, max_value=30.0, value=4.0, step=0.5) / 100.0
+
+    st.caption("Unit economics do projeto")
+    opex_mensal = st.number_input("OPEX mensal (R$)", min_value=0.0, value=float(DEFAULT_OPEX_MENSAL), step=500.0)
+    cv_por_cliente = st.number_input("Custo variável por cliente/mês (R$)", min_value=0.0, value=float(DEFAULT_CV_POR_CLIENTE), step=10.0)
+    overhead_pct = st.slider("Overhead (% sobre preço)", 0, 30, int(DEFAULT_OVERHEAD_PCT * 100), 1) / 100.0
+    n_clientes = st.number_input("Clientes ativos", min_value=0, value=int(DEFAULT_N_CLIENTES), step=1)
+    capex_inicial_projeto = st.number_input("CAPEX inicial do projeto (R$)", min_value=0.0, value=35000.0, step=500.0)
 
 
-# Filtra df por período (na UC selecionada)
+# Filtro por UC e período
+
+df_uc = df_all[df_all["uc_id"].astype(str) == str(uc_id)].copy()
+df_uc = ensure_datetime_sorted(df_uc)
+df_uc = ajustar_energia_se_acumulada(df_uc, "energia_kwh")
+max_data = df_uc["timestamp"].max()
+
 if periodo == "Últimas 24h":
     df_f = df_uc[df_uc["timestamp"] >= (max_data - pd.Timedelta(hours=24))]
 elif periodo == "Últimos 3 dias":
@@ -1550,46 +1452,199 @@ elif periodo == "Últimos 30 dias":
 else:
     df_f = df_uc.copy()
 
-tabs = st.tabs([
-    "Dashboard",
-    "Arquitetura da Solução",
-    "Metodologia (simulação)",
-    "Resultados (piloto)",
-    "Modelo Econômico (TCC)",
-    "Modelo Matemático (equações)",
-    "Segmentação (TCC)",
-    "MVP vs Visão Futura",
-    "Escala & Gargalos",
-    "Qualidade do Dado (escala)",
+if len(df_f) == 0:
+    st.error("Não há dados para o filtro selecionado.")
+    st.stop()
+
+# 
+# Cálculos globais usados pelas abas
+# 
+k = kpis_basicos(df_f)
+nivel, mensagens, meta = recomendacao_ia(
+    df_f,
+    fase=fase,
+    manejo=manejo,
+    tipo_solo=tipo_solo,
+    risco_frio=risco_frio,
+    dias_pos_floracao=int(dias_pos_floracao),
+)
+
+df_sim = aplicar_otimizacao_regras(
+    df_f,
+    lamina_max=lamina_max,
+    chuva_min_mm=chuva_min_mm,
+    evitar_ponta=evitar_ponta_otim,
+    ponta_inicio=int(ponta_inicio),
+    ponta_fim=int(ponta_fim),
+)
+
+res = comparar_cenarios(
+    df_sim,
+    tarifa_kwh_fixa=tarifa_kwh_fixa,
+    usar_tarifa_variavel=usar_tarifa_variavel,
+    tarifa_fp=tarifa_fp,
+    tarifa_ponta=tarifa_ponta,
+    ponta_inicio=int(ponta_inicio),
+    ponta_fim=int(ponta_fim),
+)
+
+dq = data_quality_metrics(df_f)
+
+# Estimativas econômicas derivadas do período selecionado
+dias_periodo = max(1.0, (df_f["timestamp"].max() - df_f["timestamp"].min()).total_seconds() / 86400.0)
+economia_rs_periodo = float(res.get("economia_rs", 0.0))
+economia_kwh_periodo = float(res.get("economia_kwh", 0.0))
+economia_rs_mensal = economia_rs_periodo * (30.0 / dias_periodo)
+preco_mensal = calc_precificacao_por_valor(economia_rs_mensal, pct_captura=pct_captura, piso=piso_plano, teto=teto_plano)
+roi_cliente = calc_roi_payback_cliente(preco_mensal, economia_rs_mensal, investimento_inicial_cliente)
+unit = unit_economics_break_even(
+    preco_mensal=preco_mensal,
+    custo_variavel_por_cliente=cv_por_cliente,
+    overhead_pct=overhead_pct,
+    opex_mensal=opex_mensal,
+    n_clientes=int(n_clientes),
+    capex_inicial=capex_inicial_projeto,
+)
+
+
+# Abas principais
+
+tab_visao, tab_monitoramento, tab_ia, tab_economico, tab_analytics, tab_auditoria = st.tabs([
+    "🏠 Visão Geral",
+    "📊 Monitoramento",
+    "🤖 Recomendações IA",
+    "⚡ Modelo Econômico",
+    "📈 Analytics",
+    "⚙️ Auditoria",
 ])
 
 
-# =========================================================
-# TAB 0 — DASHBOARD
-# =========================================================
-with tabs[0]:
-    k = kpis_basicos(df_f)
+# ABA 1 — VISÃO GERAL
+
+with tab_visao:
+    st.subheader("Visão geral do piloto")
+    st.caption("Resumo executivo dos principais indicadores da UC selecionada.")
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Lâmina média (cm)", f"{k['lamina_media']:.2f}" if np.isfinite(k["lamina_media"]) else "—")
-    c2.metric("Energia total (kWh)", f"{k['energia_total_kwh']:.1f}")
-    c3.metric("Volume total (m³)", f"{k['volume_total_m3']:.1f}")
-    c4.metric("Eficiência (kWh/m³)", f"{(k['eficiencia_kwh_m3'] if k['eficiencia_kwh_m3'] is not None else 0):.3f}")
-    c5.metric("Horas bomba ligada", f"{int(k['horas_bomba'])} h")
+    c1.metric("UC", str(uc_id))
+    c2.metric("Lâmina média", f"{k['lamina_media']:.2f} cm" if np.isfinite(k["lamina_media"]) else "—")
+    c3.metric("Energia", f"{fmt_br_number(k['energia_total_kwh'], 1)} kWh")
+    c4.metric("Eficiência", f"{k['eficiencia_kwh_m3']:.3f} kWh/m³" if k["eficiencia_kwh_m3"] is not None else "—")
+    c5.metric("Chuva 24h", f"{fmt_br_number(k['chuva_24h'], 1)} mm")
 
-    st.subheader("Recomendação automática (IA explicável) e alertas")
-    nivel, mensagens, meta = recomendacao_ia(
-        df_f,
-        fase=fase,
-        manejo=manejo,
-        tipo_solo=tipo_solo,
-        risco_frio=risco_frio,
-        dias_pos_floracao=int(dias_pos_floracao),
-    )
+    c6, c7, c8, c9 = st.columns(4)
+    c6.metric("Volume bombeado", f"{fmt_br_number(k['volume_total_m3'], 1)} m³")
+    c7.metric("Horas bomba", f"{int(k['horas_bomba'])} h")
+    c8.metric("Economia estimada", f"R$ {fmt_br_money(economia_rs_periodo)}")
+    c9.metric("Economia energética", f"{fmt_br_number(economia_kwh_periodo, 1)} kWh")
 
-    log_key = f"log_rec::{uc_id}::{periodo}::{fase}::{manejo}::{tipo_solo}::{risco_frio}::{int(dias_pos_floracao)}::{df_f['timestamp'].max()}::{RUN_ID}"
-    if st.session_state.get(log_key) is not True:
-        log_recommendation_event(
+    st.divider()
+
+    col_a, col_b = st.columns([1.2, 1])
+    with col_a:
+        st.markdown("### Status de implementação")
+        status_df = pd.DataFrame([
+            {"Componente": "6 UCs do piloto", "Situação": "Implementado", "Evidência": "DEFAULT_UCS + filtro por UC"},
+            {"Componente": "Medição de energia", "Situação": "Implementado", "Evidência": "energia_kwh / potencia_kw"},
+            {"Componente": "Sensor de lâmina d’água", "Situação": "Implementado no piloto", "Evidência": "lamina_cm"},
+            {"Componente": "SCADA / operação de bombas", "Situação": "Implementado", "Evidência": "bomba_ligada"},
+            {"Componente": "Dashboards e KPIs", "Situação": "Implementado", "Evidência": "st.metric + gráficos"},
+            {"Componente": "IA explicável por regras", "Situação": "Consolidado no MVP", "Evidência": "recomendacao_ia()"},
+            {"Componente": "ML preditivo avançado", "Situação": "Visão futura", "Evidência": "não tratado como produto pronto"},
+        ])
+        st.dataframe(status_df, use_container_width=True, hide_index=True)
+
+    with col_b:
+        st.markdown("### Fluxo de geração de valor")
+        st.markdown(
+            """
+            **Dados de campo**  
+            sensores, energia, bomba, chuva  
+            ⬇️  
+            **Base operacional**  
+            limpeza, integração e qualidade  
+            ⬇️  
+            **BI + Data Science**  
+            KPIs, eficiência e cenários  
+            ⬇️  
+            **Decisão do produtor**  
+            recomendações e economia estimada
+            """
+        )
+
+    if os.path.exists(ARQ_IMG_PATH):
+        st.markdown("### Arquitetura da solução")
+        st.image(ARQ_IMG_PATH, caption="Arquitetura geral da solução AgroData", use_container_width=True)
+
+
+# ABA 2 — MONITORAMENTO
+
+with tab_monitoramento:
+    st.subheader("Monitoramento operacional")
+    st.caption("Visualização limpa das principais variáveis coletadas no piloto.")
+
+    chart_cols = ["timestamp"]
+    for col in ["lamina_cm", "energia_kwh", "vazao_m3h", "chuva_mm", "bomba_ligada", "potencia_kw"]:
+        if col in df_f.columns:
+            chart_cols.append(col)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if "lamina_cm" in df_f.columns:
+            st.markdown("#### Lâmina d’água (cm)")
+            st.line_chart(df_f.set_index("timestamp")[["lamina_cm"]])
+        if "vazao_m3h" in df_f.columns:
+            st.markdown("#### Vazão (m³/h)")
+            st.line_chart(df_f.set_index("timestamp")[["vazao_m3h"]])
+    with col2:
+        if "energia_kwh" in df_f.columns:
+            st.markdown("#### Energia (kWh)")
+            st.line_chart(df_f.set_index("timestamp")[["energia_kwh"]])
+        if "chuva_mm" in df_f.columns:
+            st.markdown("#### Chuva (mm)")
+            st.line_chart(df_f.set_index("timestamp")[["chuva_mm"]])
+
+    if "bomba_ligada" in df_f.columns:
+        st.markdown("#### Operação da bomba")
+        st.area_chart(df_f.set_index("timestamp")[["bomba_ligada"]])
+
+    with st.expander("Ver dados do período", expanded=False):
+        st.dataframe(df_f[chart_cols].tail(500), use_container_width=True)
+
+
+# ABA 3 — RECOMENDAÇÕES IA
+
+with tab_ia:
+    st.subheader("Recomendações IA — regras explicáveis")
+    st.caption("Módulo de apoio à decisão baseado em regras transparentes e auditáveis.")
+
+    if nivel == "success":
+        st.success("Situação operacional adequada para os parâmetros atuais.")
+    elif nivel == "warning":
+        st.warning("Há pontos de atenção operacional.")
+    elif nivel == "error":
+        st.error("Há recomendação de intervenção operacional.")
+    else:
+        st.info("Recomendação informativa.")
+
+    for msg in mensagens:
+        st.markdown(f"- {msg}")
+
+    st.divider()
+    st.markdown("### Evidências da recomendação")
+    meta_df = pd.DataFrame([{
+        "Bomba atual": meta.get("bomba_atual"),
+        "Lâmina atual (cm)": meta.get("lamina_atual"),
+        "Chuva 24h (mm)": meta.get("chuva_24h"),
+        "Energia 24h (kWh)": meta.get("energia_24h"),
+        "Volume 24h (m³)": meta.get("volume_24h"),
+        "Eficiência 24h (kWh/m³)": meta.get("eficiencia_24h"),
+        "Baseline eficiência": meta.get("baseline_ef"),
+    }])
+    st.dataframe(meta_df, use_container_width=True, hide_index=True)
+
+    if st.button("Salvar recomendação em log CSV"):
+        path = log_recommendation_event(
             nivel=nivel,
             mensagens=mensagens,
             username=login_user,
@@ -1603,195 +1658,396 @@ with tabs[0]:
             meta=meta,
             uc_id=str(uc_id),
         )
-        st.session_state[log_key] = True
-
-    texto = "\n".join([f"- {m}" for m in mensagens])
-    if nivel == "success":
-        st.success(texto)
-    elif nivel == "info":
-        st.info(texto)
-    elif nivel == "warning":
-        st.warning(texto)
-    else:
-        st.error(texto)
-
-    st.subheader("Mini-resumo operacional (últimas 6h/24h)")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Bomba agora", "Ligada" if meta["bomba_atual"] == 1 else "Desligada")
-    m2.metric("Horas bomba (6h)", f"{meta['bomba_horas_6h']} h")
-    m3.metric("Energia (6h)", f"{meta['energia_6h']:.1f} kWh")
-    m4.metric("Eficiência (6h)", f"{(meta['eficiencia_6h'] if meta['eficiencia_6h'] is not None else 0):.3f} kWh/m³")
-
-    n1, n2, n3, n4 = st.columns(4)
-    n1.metric("Horas bomba (24h)", f"{meta['bomba_horas_24h']} h")
-    n2.metric("Energia (24h)", f"{meta['energia_24h']:.1f} kWh")
-    n3.metric("Volume (24h)", f"{meta['volume_24h']:.1f} m³")
-    n4.metric("Lâmina (24h)", f"{meta['lamina_min_24h']:.1f}–{meta['lamina_max_24h']:.1f} cm")
-
-    st.subheader("Tendências (período selecionado)")
-    cc1, cc2 = st.columns(2)
-
-    with cc1:
-        st.caption("Lâmina d’água (cm)")
-        if "lamina_cm" in df_f.columns:
-            st.line_chart(df_f.set_index("timestamp")["lamina_cm"])
-        else:
-            st.info("Coluna lamina_cm não encontrada.")
-
-    with cc2:
-        st.caption("Energia (kWh) e Vazão (m³/h)")
-        cols = []
-        if "energia_kwh" in df_f.columns:
-            cols.append("energia_kwh")
-        if "vazao_m3h" in df_f.columns:
-            cols.append("vazao_m3h")
-        if cols:
-            st.line_chart(df_f.set_index("timestamp")[cols])
-        else:
-            st.info("Colunas de energia/vazão não encontradas.")
-
-    st.subheader("Base de dados (amostra)")
-    st.dataframe(df_f.tail(60), use_container_width=True)
+        st.success(f"Recomendação salva em: {path}")
 
 
-# =========================================================
-# TAB 1 — ARQUITETURA
-# =========================================================
-with tabs[1]:
-    st.subheader("Arquitetura da Solução Proposta")
-    st.write(
-        "A solução é estruturada em camadas para viabilizar coleta contínua, armazenamento histórico, "
-        "processamento analítico e visualização. Fluxo: "
-        "**Sensores → SCADA → Banco de Dados → Processamento (BI/DS/IA) → Dashboards/Alertas**."
-    )
+# ABA 4 — MODELO ECONÔMICO
 
-    st.markdown(
-        """
-**Componentes principais:**
-- **Sensores / medições:** lâmina d’água, vazão, energia elétrica e variáveis climáticas.
-- **SCADA / automação:** consolida leituras e registra eventos operacionais.
-- **Banco de dados:** armazena histórico e padroniza dados para análises.
-- **Processamento (BI + Data Science + IA):** KPIs, detecção de desvios e recomendações.
-- **Dashboards + alertas:** suporte à decisão para o manejo da irrigação.
-        """.strip()
-    )
-
-    if os.path.exists(ARQ_IMG_PATH):
-        st.image(ARQ_IMG_PATH, caption="Arquitetura da solução (imagem)", use_container_width=True)
-    else:
-        st.caption(f"Imagem de arquitetura não encontrada em: {ARQ_IMG_PATH}")
-
-
-# =========================================================
-# TAB 2 — METODOLOGIA
-# =========================================================
-with tabs[2]:
-    st.subheader("Metodologia (simulação)")
-    st.markdown(
-        """
-**1) Coleta/Geração de dados**
-- Leitura de dados reais quando disponíveis; caso contrário, simulação realista multi-UC (90 dias).
-- Variáveis: lâmina, vazão, energia, chuva, ET0 proxy e estado da bomba.
-
-**2) Tratamento e organização**
-- Padronização, limpeza e ordenação temporal.
-- Preparado para *intervalo irregular* via \\(dt\\) (integração robusta de volume/energia).
-- Compatibilidade com energia acumulada (conversão para energia por intervalo).
-
-**3) Indicadores (BI)**
-- KPIs operacionais e gráficos de tendência.
-
-**4) Suporte à decisão (IA explicável)**
-- Regras interpretáveis para alertas e recomendações.
-- Otimização por regras (baseline vs otimizado) e opção de evitar ponta.
-
-**5) Evidências (Auditoria)**
-- Logs em CSV com versão do app e ID de execução (RUN_ID).
-- Relatório por UC (Modo Avaliador) + gráficos (PNG).
-        """.strip()
-    )
-
-
-# =========================================================
-# TAB 3 — RESULTADOS PILOTO
-# =========================================================
-with tabs[3]:
-    st.subheader("Resultados (piloto) — Baseline vs Otimizado (simulação por regras)")
+with tab_economico:
+    st.subheader("Modelo econômico da irrigação")
     st.caption(
-        "Comparação do cenário atual (baseline) com um cenário otimizado baseado em regras interpretáveis "
-        "(ex.: adiar bombeamento após chuva relevante, evitar excesso de lâmina e (opcional) evitar ponta)."
+        "entradas operacionais → consumo baseline → cenário otimizado → economia → cobrança do serviço."
     )
 
-    df_sim = aplicar_otimizacao_regras(
-        df_f,
-        lamina_max=lamina_max,
-        chuva_min_mm=chuva_min_mm,
-        evitar_ponta=evitar_ponta_otim,
-        ponta_inicio=int(ponta_inicio),
-        ponta_fim=int(ponta_fim),
+    st.info(
+        "Viabilidade econômica do piloto. "
+        "Permite simular a economia por UC/levante, estimar a cobrança da AgroData e calcular o ganho líquido do produtor."
     )
-    res = comparar_cenarios(
-        df_sim,
-        tarifa_kwh_fixa=tarifa_kwh_fixa,
-        usar_tarifa_variavel=usar_tarifa_variavel,
-        tarifa_fp=tarifa_fp,
-        tarifa_ponta=tarifa_ponta,
-        ponta_inicio=int(ponta_inicio),
-        ponta_fim=int(ponta_fim),
+
+    # ---------------------------
+    # 1) Parâmetros gerais do modelo
+    # ---------------------------
+    st.markdown("### 1. Entradas gerais")
+    col_i1, col_i2, col_i3, col_i4 = st.columns(4)
+    with col_i1:
+        data_inicio_safra = st.date_input("Início da safra", value=df_f["timestamp"].min().date())
+    with col_i2:
+        data_fim_safra = st.date_input("Fim da safra", value=df_f["timestamp"].max().date())
+    with col_i3:
+        tarifa_modelo = st.number_input(
+            "Tarifa usada no modelo (R$/kWh)",
+            min_value=0.0,
+            value=float(tarifa_kwh_fixa if not usar_tarifa_variavel else tarifa_fp),
+            step=0.01,
+            key="modelo_tarifa_kwh",
+        )
+    with col_i4:
+        area_irrigada_ha = st.number_input(
+            "Área irrigada considerada (ha)",
+            min_value=1.0,
+            value=300.0,
+            step=10.0,
+            key="modelo_area_ha",
+        )
+
+    col_i5, col_i6, col_i7, col_i8 = st.columns(4)
+    with col_i5:
+        dias_modelo = st.number_input(
+            "Dias de operação da safra",
+            min_value=1,
+            value=int(max(1, (pd.Timestamp(data_fim_safra) - pd.Timestamp(data_inicio_safra)).days + 1)),
+            step=1,
+            key="modelo_dias_operacao",
+        )
+    with col_i6:
+        pct_cobranca_servico = st.slider(
+            "Cobrança do serviço (% da economia)",
+            min_value=0,
+            max_value=50,
+            value=int(pct_captura * 100),
+            step=1,
+            key="modelo_pct_cobranca",
+        ) / 100.0
+    with col_i7:
+        reducao_default = st.slider(
+            "Redução otimizada padrão (%)",
+            min_value=0,
+            max_value=30,
+            value=10,
+            step=1,
+            key="modelo_reducao_default",
+        ) / 100.0
+    with col_i8:
+        eficiencia_default = st.slider(
+            "Eficiência média do conjunto (%)",
+            min_value=40,
+            max_value=100,
+            value=85,
+            step=1,
+            key="modelo_eficiencia_default",
+        ) / 100.0
+
+    
+    # 2) Tabela editável por UC/levante
+    
+    st.markdown("### 2. Tabela por UC / levante")
+    st.caption(
+        "Ajuste potência, horas de operação e redução esperada. "
+        
     )
+
+    ucs_modelo = sorted(df_all["uc_id"].astype(str).unique().tolist())
+    linhas_default = []
+    for uc in ucs_modelo:
+        df_tmp = df_all[df_all["uc_id"].astype(str) == uc].copy()
+        k_tmp = kpis_basicos(df_tmp) if len(df_tmp) > 0 else {"horas_bomba": 0, "energia_total_kwh": 0}
+        horas_por_dia = float(k_tmp.get("horas_bomba", 0)) / max(1, n_dias)
+        energia_media_dia = float(k_tmp.get("energia_total_kwh", 0)) / max(1, n_dias)
+        # Estimativa simples de potência média em kW e conversão aproximada para cv.
+        potencia_kw_est = energia_media_dia / max(1.0, horas_por_dia) if horas_por_dia > 0 else 75.0
+        potencia_cv_est = potencia_kw_est / 0.7355
+        linhas_default.append({
+            "UC": uc,
+            "Levante / identificação": f"Levante {uc}",
+            "Potência total (cv)": round(max(50.0, potencia_cv_est), 1),
+            "Eficiência do conjunto (%)": round(eficiencia_default * 100, 1),
+            "Horas/dia baseline": round(max(1.0, horas_por_dia), 1),
+            "Dias operação": int(dias_modelo),
+            "Redução esperada (%)": round(reducao_default * 100, 1),
+        })
+
+    df_inputs_modelo = pd.DataFrame(linhas_default)
+    df_editado = st.data_editor(
+        df_inputs_modelo,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        column_config={
+            "UC": st.column_config.TextColumn("UC"),
+            "Levante / identificação": st.column_config.TextColumn("Levante / identificação"),
+            "Potência total (cv)": st.column_config.NumberColumn("Potência total (cv)", min_value=0.0, step=1.0, format="%.1f"),
+            "Eficiência do conjunto (%)": st.column_config.NumberColumn("Eficiência do conjunto (%)", min_value=1.0, max_value=100.0, step=1.0, format="%.1f"),
+            "Horas/dia baseline": st.column_config.NumberColumn("Horas/dia baseline", min_value=0.0, max_value=24.0, step=0.5, format="%.1f"),
+            "Dias operação": st.column_config.NumberColumn("Dias operação", min_value=1, max_value=365, step=1),
+            "Redução esperada (%)": st.column_config.NumberColumn("Redução esperada (%)", min_value=0.0, max_value=100.0, step=1.0, format="%.1f"),
+        },
+        key="modelo_editor_ucs",
+    )
+
+    
+    # 3) Cálculos do modelo econômico
+    
+    df_calc = df_editado.copy()
+    for col in ["Potência total (cv)", "Eficiência do conjunto (%)", "Horas/dia baseline", "Dias operação", "Redução esperada (%)"]:
+        df_calc[col] = pd.to_numeric(df_calc[col], errors="coerce").fillna(0.0)
+
+    df_calc["Potência útil (kW)"] = df_calc["Potência total (cv)"] * 0.7355
+    df_calc["Eficiência decimal"] = (df_calc["Eficiência do conjunto (%)"] / 100.0).replace(0, np.nan)
+    df_calc["Potência ajustada (kW)"] = df_calc["Potência útil (kW)"] / df_calc["Eficiência decimal"]
+    df_calc["kWh baseline"] = df_calc["Potência ajustada (kW)"] * df_calc["Horas/dia baseline"] * df_calc["Dias operação"]
+    df_calc["kWh otimizado"] = df_calc["kWh baseline"] * (1.0 - (df_calc["Redução esperada (%)]"] if "Redução esperada (%)]" in df_calc.columns else df_calc["Redução esperada (%)"]) / 100.0)
+    df_calc["Economia kWh"] = df_calc["kWh baseline"] - df_calc["kWh otimizado"]
+    df_calc["Custo baseline (R$)"] = df_calc["kWh baseline"] * float(tarifa_modelo)
+    df_calc["Custo otimizado (R$)"] = df_calc["kWh otimizado"] * float(tarifa_modelo)
+    df_calc["Economia bruta (R$)"] = df_calc["Custo baseline (R$)"] - df_calc["Custo otimizado (R$)"]
+    df_calc["Cobrança AgroData (R$)"] = df_calc["Economia bruta (R$)"] * float(pct_cobranca_servico)
+    df_calc["Economia líquida produtor (R$)"] = df_calc["Economia bruta (R$)"] - df_calc["Cobrança AgroData (R$)"]
+    df_calc["Economia por ha (R$/ha)"] = df_calc["Economia líquida produtor (R$)"] / max(1.0, float(area_irrigada_ha))
+
+    # Remove coluna técnica antes de exibir
+    df_resultado_modelo = df_calc.drop(columns=["Eficiência decimal"], errors="ignore")
+
+    total_baseline_kwh = float(df_calc["kWh baseline"].sum())
+    total_otim_kwh = float(df_calc["kWh otimizado"].sum())
+    total_economia_kwh = float(df_calc["Economia kWh"].sum())
+    total_custo_base = float(df_calc["Custo baseline (R$)"].sum())
+    total_custo_otim = float(df_calc["Custo otimizado (R$)"].sum())
+    total_economia_bruta = float(df_calc["Economia bruta (R$)"].sum())
+    total_receita_agrodata = float(df_calc["Cobrança AgroData (R$)"].sum())
+    total_economia_liquida = float(df_calc["Economia líquida produtor (R$)"].sum())
+    economia_por_ha = total_economia_liquida / max(1.0, float(area_irrigada_ha))
+
+    st.markdown("### 3. Resultados consolidados")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Consumo baseline", f"{fmt_br_number(total_baseline_kwh, 1)} kWh")
+    m2.metric("Consumo otimizado", f"{fmt_br_number(total_otim_kwh, 1)} kWh")
+    m3.metric("Economia energética", f"{fmt_br_number(total_economia_kwh, 1)} kWh")
+    m4.metric("Redução média", f"{(total_economia_kwh / total_baseline_kwh * 100):.1f}%" if total_baseline_kwh > 0 else "—")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Custo baseline", f"R$ {fmt_br_money(total_custo_base)}")
+    m6.metric("Economia bruta", f"R$ {fmt_br_money(total_economia_bruta)}")
+    m7.metric("Cobrança AgroData", f"R$ {fmt_br_money(total_receita_agrodata)}")
+    m8.metric("Economia líquida produtor", f"R$ {fmt_br_money(total_economia_liquida)}")
+
+    st.caption(f"Economia líquida estimada por hectare: **R$ {fmt_br_money(economia_por_ha)}/ha**")
+
+    st.markdown("### 4. Resultado por UC")
+    st.dataframe(
+        df_resultado_modelo[[
+            "UC", "Levante / identificação", "Potência total (cv)", "Horas/dia baseline", "Dias operação",
+            "Redução esperada (%)", "kWh baseline", "kWh otimizado", "Economia kWh",
+            "Custo baseline (R$)", "Custo otimizado (R$)", "Economia bruta (R$)",
+            "Cobrança AgroData (R$)", "Economia líquida produtor (R$)", "Economia por ha (R$/ha)"
+        ]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    col_g1, col_g2 = st.columns(2)
+    with col_g1:
+        st.markdown("#### Economia bruta por UC")
+        st.bar_chart(df_calc.set_index("UC")[["Economia bruta (R$)"]])
+    with col_g2:
+        st.markdown("#### kWh baseline x otimizado")
+        st.bar_chart(df_calc.set_index("UC")[["kWh baseline", "kWh otimizado"]])
+
+    
+    # 4) Cenários de sensibilidade — 5%, 10%, 15%, 20%
+    
+    st.markdown("### 5. Sensibilidade por percentual de redução")
+    cenarios_pct = [0.05, 0.10, 0.15, 0.20]
+    cenarios_rows = []
+    for pct in cenarios_pct:
+        econ_kwh = total_baseline_kwh * pct
+        econ_bruta = econ_kwh * float(tarifa_modelo)
+        receita = econ_bruta * float(pct_cobranca_servico)
+        liquida = econ_bruta - receita
+        cenarios_rows.append({
+            "Cenário": f"Redução {pct*100:.0f}%",
+            "Economia kWh": econ_kwh,
+            "Economia bruta (R$)": econ_bruta,
+            "Cobrança AgroData (R$)": receita,
+            "Economia líquida produtor (R$)": liquida,
+            "Economia por ha (R$/ha)": liquida / max(1.0, float(area_irrigada_ha)),
+        })
+    df_sens = pd.DataFrame(cenarios_rows)
+    st.dataframe(df_sens, use_container_width=True, hide_index=True)
+    st.bar_chart(df_sens.set_index("Cenário")[["Economia bruta (R$)", "Economia líquida produtor (R$)"]])
+
+    
+    # 5) Comparação com o cálculo baseado nos dados do protótipo
+    
+    st.markdown("### 6. Comparação com simulação operacional do protótipo")
+    st.caption(
+        "Este quadro compara o modelo econômico parametrizado acima com o resultado calculado diretamente dos dados da UC selecionada."
+    )
+    comparativo_modelos = pd.DataFrame([
+        {
+            "Origem do cálculo": "Modelo econômico por potência/horas",
+            "Energia baseline (kWh)": total_baseline_kwh,
+            "Energia otimizada (kWh)": total_otim_kwh,
+            "Economia kWh": total_economia_kwh,
+            "Economia R$": total_economia_bruta,
+        },
+        {
+            "Origem do cálculo": "Dados do protótipo / regras de otimização",
+            "Energia baseline (kWh)": res["energia_base"],
+            "Energia otimizada (kWh)": res["energia_otim"],
+            "Economia kWh": res["economia_kwh"],
+            "Economia R$": res["economia_rs"],
+        },
+    ])
+    st.dataframe(comparativo_modelos, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.markdown("### 7. Precificação, ROI, payback e unit economics")
+    economia_rs_mensal_modelo = total_economia_bruta * (30.0 / max(1.0, float(dias_modelo)))
+    preco_mensal_modelo = calc_precificacao_por_valor(
+        economia_rs_mensal_modelo,
+        pct_captura=pct_cobranca_servico,
+        piso=piso_plano,
+        teto=teto_plano,
+    )
+    roi_cliente_modelo = calc_roi_payback_cliente(preco_mensal_modelo, economia_rs_mensal_modelo, investimento_inicial_cliente)
+    unit_modelo = unit_economics_break_even(
+        preco_mensal=preco_mensal_modelo,
+        custo_variavel_por_cliente=cv_por_cliente,
+        overhead_pct=overhead_pct,
+        opex_mensal=opex_mensal,
+        n_clientes=int(n_clientes),
+        capex_inicial=capex_inicial_projeto,
+    )
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Economia mensal estimada", f"R$ {fmt_br_money(economia_rs_mensal_modelo)}")
+    r2.metric("Preço mensal sugerido", f"R$ {fmt_br_money(preco_mensal_modelo)}")
+    r3.metric("ROI mensal cliente", f"{roi_cliente_modelo['roi_mensal'] * 100:.1f}%" if roi_cliente_modelo["roi_mensal"] is not None else "—")
+    r4.metric("Payback cliente", f"{roi_cliente_modelo['payback_meses']:.1f} meses" if roi_cliente_modelo["payback_meses"] is not None else "—")
+
+    unit_df = pd.DataFrame([unit_modelo])
+    st.dataframe(unit_df, use_container_width=True, hide_index=True)
+
+    # VPL com base nos cenários da tabela de sensibilidade
+    df_vpl_modelo = df_sens.copy()
+    df_vpl_modelo["VPL AgroData (R$)"] = df_vpl_modelo["Cobrança AgroData (R$)"].apply(lambda x: npv_anuidades(x * (365.0 / max(1.0, float(dias_modelo))), taxa_desconto, int(horizonte_anos)))
+    df_vpl_modelo["VPL Produtor (R$)"] = df_vpl_modelo["Economia líquida produtor (R$)"].apply(lambda x: npv_anuidades(x * (365.0 / max(1.0, float(dias_modelo))), taxa_desconto, int(horizonte_anos)))
+    st.markdown("#### VPL por cenário de sensibilidade")
+    st.dataframe(df_vpl_modelo, use_container_width=True, hide_index=True)
+
+    
+    # 6) Downloads e evidências
+
+    st.markdown("### 8. Exportar evidências")
+    csv_modelo = df_resultado_modelo.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Baixar resultado do modelo econômico (CSV)",
+        data=csv_modelo,
+        file_name=f"modelo_economico_{uc_id}_{RUN_ID}.csv",
+        mime="text/csv",
+    )
+
+    resumo_modelo = pd.DataFrame([{
+        "run_id": RUN_ID,
+        "uc_selecionada": uc_id,
+        "dias_modelo": dias_modelo,
+        "area_irrigada_ha": area_irrigada_ha,
+        "tarifa_rs_kwh": tarifa_modelo,
+        "consumo_baseline_kwh": total_baseline_kwh,
+        "consumo_otimizado_kwh": total_otim_kwh,
+        "economia_kwh": total_economia_kwh,
+        "custo_baseline_rs": total_custo_base,
+        "custo_otimizado_rs": total_custo_otim,
+        "economia_bruta_rs": total_economia_bruta,
+        "cobranca_agrodata_rs": total_receita_agrodata,
+        "economia_liquida_produtor_rs": total_economia_liquida,
+        "economia_por_ha_rs": economia_por_ha,
+        "preco_mensal_sugerido_rs": preco_mensal_modelo,
+    }])
+
+    if st.button("Salvar modelo econômico em log CSV"):
+        _safe_mkdir(LOG_DIR)
+        if not os.path.exists(ECO_LOG_PATH):
+            resumo_modelo.to_csv(ECO_LOG_PATH, index=False, encoding="utf-8")
+        else:
+            resumo_modelo.to_csv(ECO_LOG_PATH, mode="a", header=False, index=False, encoding="utf-8")
+        st.success(f"Modelo econômico salvo em: {ECO_LOG_PATH}")
+
+
+# ABA 5 — ANALYTICS
+
+with tab_analytics:
+    st.subheader("Analytics e comparação entre UCs")
+    st.caption("Análises exploratórias para apoiar visão de escala e desempenho operacional.")
+
+    rows = []
+    for uc in sorted(df_all["uc_id"].astype(str).unique().tolist()):
+        df_tmp = df_all[df_all["uc_id"].astype(str) == uc].copy()
+        df_tmp = ensure_datetime_sorted(df_tmp)
+        max_tmp = df_tmp["timestamp"].max()
+        if periodo == "Últimas 24h":
+            df_tmp = df_tmp[df_tmp["timestamp"] >= (max_tmp - pd.Timedelta(hours=24))]
+        elif periodo == "Últimos 3 dias":
+            df_tmp = df_tmp[df_tmp["timestamp"] >= (max_tmp - pd.Timedelta(days=3))]
+        elif periodo == "Últimos 7 dias":
+            df_tmp = df_tmp[df_tmp["timestamp"] >= (max_tmp - pd.Timedelta(days=7))]
+        elif periodo == "Últimos 30 dias":
+            df_tmp = df_tmp[df_tmp["timestamp"] >= (max_tmp - pd.Timedelta(days=30))]
+        if len(df_tmp) < 2:
+            continue
+        k_uc = kpis_basicos(df_tmp)
+        rows.append({
+            "UC": uc,
+            "Lâmina média (cm)": k_uc["lamina_media"],
+            "Energia (kWh)": k_uc["energia_total_kwh"],
+            "Volume (m³)": k_uc["volume_total_m3"],
+            "Eficiência (kWh/m³)": k_uc["eficiencia_kwh_m3"],
+            "Horas bomba": k_uc["horas_bomba"],
+        })
+
+    df_uc_comp = pd.DataFrame(rows)
+    st.dataframe(df_uc_comp, use_container_width=True, hide_index=True)
+
+    if len(df_uc_comp) > 0:
+        st.markdown("#### Comparativo por UC")
+        chart_data = df_uc_comp.set_index("UC")[["Energia (kWh)", "Volume (m³)", "Horas bomba"]]
+        st.bar_chart(chart_data)
+
+    st.divider()
+    st.markdown("### Correlação entre variáveis operacionais")
+    num_cols = [c for c in ["lamina_cm", "energia_kwh", "vazao_m3h", "chuva_mm", "bomba_ligada", "potencia_kw", "et0_mm"] if c in df_f.columns]
+    if len(num_cols) >= 2:
+        corr = df_f[num_cols].corr(numeric_only=True)
+        st.dataframe(corr, use_container_width=True)
+    else:
+        st.info("Não há variáveis numéricas suficientes para matriz de correlação.")
+
+    st.markdown("### Qualidade dos dados")
+    dq_cols = st.columns(4)
+    dq_cols[0].metric("Registros", dq["n_registros"])
+    dq_cols[1].metric("Missing lâmina", f"{dq['missing_lamina_pct']:.1f}%")
+    dq_cols[2].metric("Missing energia", f"{dq['missing_energia_pct']:.1f}%")
+    dq_cols[3].metric("dt mediana", f"{dq['dt_mediana_h']:.2f} h" if np.isfinite(dq["dt_mediana_h"]) else "—")
+
+
+# ABA 6 — AUDITORIA
+
+with tab_auditoria:
+    st.subheader("Auditoria, evidências e governança")
+    st.caption("Logs, rastreabilidade, qualidade do dado e relatórios do avaliador.")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Energia Base (kWh)", f"{res['energia_base']:.1f}")
-    c2.metric("Energia Otim (kWh)", f"{res['energia_otim']:.1f}")
-    c3.metric("Economia (kWh)", f"{res['economia_kwh']:.1f}")
-    c4.metric("Economia (R$)", fmt_br_money(res["economia_rs"]))
+    c1.metric("Versão", APP_VERSION)
+    c2.metric("RUN_ID", RUN_ID)
+    c3.metric("Usuário", login_user)
+    c4.metric("Avaliador", evaluator_name)
 
-    st.markdown("### Eficiência e operação")
-    d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Eficiência Base (kWh/m³)", f"{(res['ef_base'] if np.isfinite(res['ef_base']) else 0):.3f}")
-    d2.metric("Eficiência Otim (kWh/m³)", f"{(res['ef_otim'] if np.isfinite(res['ef_otim']) else 0):.3f}")
-    d3.metric("Horas bomba Base", f"{res['horas_bomba_base']} h")
-    d4.metric("Horas bomba Otim", f"{res['horas_bomba_otim']} h")
-
-    st.markdown("### Redução de bombeamento (proxy de água)")
-    st.info(
-        f"Volume bombeado (Base): {res['volume_base']:.1f} m³ | "
-        f"(Otimizado): {res['volume_otim']:.1f} m³ | "
-        f"Redução estimada: {res['reducao_volume']:.1f} m³"
-    )
-
-    if usar_tarifa_variavel:
-        st.markdown("### Tarifa horo-sazonal (ponta/fora-ponta) — evidência")
-        t1, t2, t3, t4 = st.columns(4)
-        t1.metric("Custo base (Ponta)", fmt_br_money(res.get("custo_base_ponta", np.nan)))
-        t2.metric("Custo base (Fora-ponta)", fmt_br_money(res.get("custo_base_fp", np.nan)))
-        t3.metric("Custo otim (Ponta)", fmt_br_money(res.get("custo_otim_ponta", np.nan)))
-        t4.metric("Custo otim (Fora-ponta)", fmt_br_money(res.get("custo_otim_fp", np.nan)))
-
-    st.markdown("### Gráficos comparativos (energia e vazão)")
-    comp = pd.DataFrame({"timestamp": df_sim["timestamp"]}).set_index("timestamp")
-
-    if "energia_kwh" in df_sim.columns:
-        comp["energia_base_kwh"] = pd.to_numeric(df_sim["energia_kwh"], errors="coerce").fillna(0.0)
-    if "energia_otim_kwh" in df_sim.columns:
-        comp["energia_otim_kwh"] = pd.to_numeric(df_sim["energia_otim_kwh"], errors="coerce").fillna(0.0)
-    if "vazao_m3h" in df_sim.columns:
-        comp["vazao_base_m3h"] = pd.to_numeric(df_sim["vazao_m3h"], errors="coerce").fillna(0.0)
-    if "vazao_otim_m3h" in df_sim.columns:
-        comp["vazao_otim_m3h"] = pd.to_numeric(df_sim["vazao_otim_m3h"], errors="coerce").fillna(0.0)
-
-    cols_e = [c for c in ["energia_base_kwh", "energia_otim_kwh"] if c in comp.columns]
-    cols_v = [c for c in ["vazao_base_m3h", "vazao_otim_m3h"] if c in comp.columns]
-
-    if cols_e:
-        st.line_chart(comp[cols_e])
-    if cols_v:
-        st.line_chart(comp[cols_v])
-
-    st.markdown("### Evidência para o TCC (CSV)")
-    if st.button("Salvar resultados desta simulação"):
-        path = salvar_resultados_piloto(
-            res=res,
+    st.divider()
+    st.markdown("### Modo avaliador — relatório por UC")
+    salvar_detalhe_uc = st.checkbox("Salvar detalhe por UC (CSV grande)", value=False)
+    if st.button("Gerar relatório consolidado por UC"):
+        csv_path, png_rs_path, png_kwh_path = relatorio_avaliador_por_uc(
+            df_all=df_all,
             periodo_label=periodo,
             lamina_max=lamina_max,
             chuva_min_mm=chuva_min_mm,
@@ -1802,532 +2058,19 @@ with tabs[3]:
             ponta_inicio=int(ponta_inicio),
             ponta_fim=int(ponta_fim),
             evitar_ponta=evitar_ponta_otim,
-            username=login_user,
-            evaluator=evaluator_name,
-            uc_id=str(uc_id),
+            salvar_detalhe_por_uc=salvar_detalhe_uc,
         )
-        st.success(f"Resultados salvos em: {path}")
-
-    if os.path.exists(RES_LOG_PATH):
-        st.caption("Histórico salvo (últimas 20 linhas):")
-        hist = pd.read_csv(RES_LOG_PATH)
-        st.dataframe(hist.tail(20), use_container_width=True)
-
-
-# =========================================================
-# TAB 4 — MODELO ECONÔMICO (TCC)
-# =========================================================
-with tabs[4]:
-    st.subheader("Modelo Econômico (TCC) — Economia → Cenários → VPL → Precificação → Unit Economics")
-
-    
-    with st.expander("(Unit Economics + Break-even + Captura de Valor)", expanded=False):
-        st.markdown(
-            r"""
-### Análise de Unit Economics e Ponto de Equilíbrio
-
-A sustentabilidade financeira do AgroData foi avaliada por meio da análise de *unit economics*, considerando a relação entre preço, custos variáveis por cliente e custos fixos operacionais.
-
-O modelo adota uma estratégia de **precificação baseada em captura de valor**, na qual o preço mensal do serviço corresponde a um percentual da economia financeira gerada ao produtor rural. Formalmente:
-
-\[
-P = \min\left(\max(E_{mensal}\cdot \beta, P_{mín}), P_{máx}\right)
-\]
-
-Onde:
-- \(P\) = preço mensal do serviço  
-- \(E_{mensal}\) = economia mensal estimada ao cliente  
-- \(\beta\) = percentual de captura de valor  
-- \(P_{mín}\), \(P_{máx}\) = limites estratégicos do plano  
-
-A partir do preço definido, calcula-se a **margem de contribuição por cliente**:
-
-\[
-MC = P - CV - O
-\]
-
-Onde:
-- \(MC\) = margem de contribuição mensal por cliente  
-- \(CV\) = custo variável por cliente  
-- \(O\) = overhead proporcional (impostos e despesas administrativas)  
-
-O **ponto de equilíbrio (Break-even)** é determinado pela razão entre o custo fixo mensal total (OPEX) e a margem de contribuição:
-
-\[
-BE = \frac{OPEX}{MC}
-\]
-
-O resultado indica o número mínimo de clientes necessários para que a operação cubra integralmente seus custos fixos.
-
-Adicionalmente, o **payback do investimento inicial (CAPEX)** é calculado considerando a margem total mensal obtida no cenário de clientes ativos:
-
-\[
-Payback = \frac{CAPEX}{MC \cdot N}
-\]
-
-Essa abordagem permite demonstrar sustentabilidade financeira, escalabilidade e coerência entre valor entregue e rentabilidade do negócio.
-            """.strip()
-        )
-
-    df_sim = aplicar_otimizacao_regras(
-        df_f,
-        lamina_max=lamina_max,
-        chuva_min_mm=chuva_min_mm,
-        evitar_ponta=evitar_ponta_otim,
-        ponta_inicio=int(ponta_inicio),
-        ponta_fim=int(ponta_fim),
-    )
-    res = comparar_cenarios(
-        df_sim,
-        tarifa_kwh_fixa=tarifa_kwh_fixa,
-        usar_tarifa_variavel=usar_tarifa_variavel,
-        tarifa_fp=tarifa_fp,
-        tarifa_ponta=tarifa_ponta,
-        ponta_inicio=int(ponta_inicio),
-        ponta_fim=int(ponta_fim),
-    )
-
-    economia_periodo_rs = float(res["economia_rs"])
-    economia_periodo_kwh = float(res["economia_kwh"])
-    custo_base_periodo_rs = float(res["custo_base"])
-
-    if periodo == "Últimas 24h":
-        fator_mes = 30
-        dias_periodo = 1
-    elif periodo == "Últimos 3 dias":
-        fator_mes = 10
-        dias_periodo = 3
-    elif periodo == "Últimos 7 dias":
-        fator_mes = (30 / 7)
-        dias_periodo = 7
-    elif periodo == "Últimos 30 dias":
-        fator_mes = 1
-        dias_periodo = 30
-    else:
-        dias_periodo = max(1, int((df_f["timestamp"].max() - df_f["timestamp"].min()).total_seconds() / 86400))
-        fator_mes = 30 / dias_periodo
-
-    economia_mensal_rs = economia_periodo_rs * fator_mes
-    economia_mensal_kwh = economia_periodo_kwh * fator_mes
-
-    economia_diaria_rs = economia_periodo_rs / max(1, dias_periodo)
-    economia_safra_rs = economia_diaria_rs * duracao_safra_dias
-
-    preco_sugerido = calc_precificacao_por_valor(
-        economia_rs_mensal=economia_mensal_rs,
-        pct_captura=pct_captura,
-        piso=piso_plano,
-        teto=teto_plano,
-    )
-
-    met_cliente = calc_roi_payback_cliente(
-        preco_mensal=preco_sugerido,
-        economia_rs_mensal=economia_mensal_rs,
-        investimento_inicial=investimento_inicial_cliente,
-    )
-
-    st.markdown("### Economia estimada (a partir do período selecionado)")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Economia (R$/mês)", fmt_br_money(economia_mensal_rs))
-    c2.metric("Economia (kWh/mês)", fmt_br_number(economia_mensal_kwh, 1))
-    c3.metric("Economia na safra (R$)", fmt_br_money(economia_safra_rs))
-    c4.metric("Tarifa usada", "Horo-sazonal" if usar_tarifa_variavel else f"Fixa ({tarifa_kwh_fixa:.2f})")
-
-    st.markdown("### Precificação + ROI/Payback (cliente)")
-    p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Preço sugerido (R$/mês)", fmt_br_money(preco_sugerido))
-    p2.metric("ROI mensal (cliente)", f"{met_cliente['roi_mensal']*100:.1f}%" if met_cliente["roi_mensal"] is not None else "—")
-    p3.metric("Ganho líquido (R$/mês)", fmt_br_money(met_cliente["ganho_liquido"]) if met_cliente["ganho_liquido"] is not None else "—")
-    p4.metric("Payback (cliente) (meses)", fmt_br_number(met_cliente["payback_meses"], 1) if met_cliente["payback_meses"] is not None else "—")
-
-    st.divider()
-
-    st.markdown("### Unit Economics + Break-even (projeto)")
-    ue = unit_economics_break_even(
-        preco_mensal=preco_sugerido,
-        custo_variavel_por_cliente=cv_por_cliente,
-        overhead_pct=overhead_pct,
-        opex_mensal=opex_mensal,
-        n_clientes=int(n_clientes),
-        capex_inicial=capex_inicial_projeto,
-    )
-
-    u1, u2, u3, u4 = st.columns(4)
-    u1.metric("Margem contribuição / cliente (MC)", fmt_br_money(ue["margem_contribuicao"]))
-    u2.metric("Overhead (R$/cliente)", fmt_br_money(ue["overhead_rs"]))
-    u3.metric("Break-even (clientes)", fmt_br_number(ue["break_even_clientes"], 1) if ue["break_even_clientes"] is not None else "—")
-    u4.metric("Lucro mensal (N clientes)", fmt_br_money(ue["lucro_mensal_projeto"]))
-
-    u5, u6, u7, u8 = st.columns(4)
-    u5.metric("OPEX mensal", fmt_br_money(ue["opex_mensal"]))
-    u6.metric("Clientes ativos (N)", f"{ue['n_clientes']}")
-    u7.metric("CAPEX inicial (projeto)", fmt_br_money(ue["capex_inicial"]))
-    u8.metric("Payback CAPEX (meses)", fmt_br_number(ue["payback_capex_meses"], 1) if ue["payback_capex_meses"] is not None else "—")
-
-    st.caption("Interpretação: break-even indica quantos clientes são necessários para cobrir OPEX; payback CAPEX usa a margem total MC·N.")
-
-    st.divider()
-
-    st.markdown("### Cenários de economia (5% / 10% / 15%) sobre o custo base do período")
-    df_cen = calcular_cenarios_economia(custo_base_periodo=custo_base_periodo_rs, alpha=alpha_receita)
-
-    df_cen_show = df_cen.copy()
-    df_cen_show["r (%)"] = (df_cen_show["r"] * 100).round(1)
-    df_cen_show["Economia bruta (R$)"] = df_cen_show["economia_bruta_rs"].round(2)
-    df_cen_show["Receita serviço (R$)"] = df_cen_show["receita_servico_rs"].round(2)
-    df_cen_show["Economia líquida produtor (R$)"] = df_cen_show["economia_liquida_produtor_rs"].round(2)
-    st.dataframe(df_cen_show[["cenário", "r (%)", "Economia bruta (R$)", "Receita serviço (R$)", "Economia líquida produtor (R$)"]], use_container_width=True)
-
-    fig_c = plot_cenarios_bar(df_cen, title=f"Cenários — base do período ({periodo})")
-    png_c = fig_to_png_bytes(fig_c)
-    st.image(png_c, caption="Gráfico — Cenários (economia vs receita)", use_container_width=True)
-    st.download_button("Baixar gráfico (PNG) — Cenários", data=png_c, file_name="grafico_cenarios.png", mime="image/png")
-
-    st.divider()
-
-    st.markdown("### VPL (Valor Presente Líquido) — horizonte e taxa definidos")
-    custo_base_mensal = custo_base_periodo_rs * fator_mes
-    custo_base_anual = custo_base_mensal * 12
-
-    vpl_rows = []
-    for _, row in df_cen.iterrows():
-        nome = row["cenário"]
-        r = float(row["r"])
-        econ_bruta_anual = custo_base_anual * r
-        receita_anual = econ_bruta_anual * alpha_receita
-        econ_liq_anual = econ_bruta_anual - receita_anual
-
-        vpl_proj = npv_anuidades(receita_anual, taxa_desconto, int(horizonte_anos))
-        vpl_prod = npv_anuidades(econ_liq_anual, taxa_desconto, int(horizonte_anos))
-
-        vpl_rows.append({
-            "cenário": nome,
-            "r": r,
-            "cf_receita_anual_rs": receita_anual,
-            "cf_econ_liq_anual_rs": econ_liq_anual,
-            "vpl_projeto_rs": vpl_proj,
-            "vpl_produtor_rs": vpl_prod,
-        })
-
-    df_vpl = pd.DataFrame(vpl_rows)
-    df_vpl_show = df_vpl.copy()
-    df_vpl_show["r (%)"] = (df_vpl_show["r"] * 100).round(1)
-    df_vpl_show["Receita anual (R$)"] = df_vpl_show["cf_receita_anual_rs"].round(2)
-    df_vpl_show["Economia líquida anual (R$)"] = df_vpl_show["cf_econ_liq_anual_rs"].round(2)
-    df_vpl_show["VPL projeto (R$)"] = df_vpl_show["vpl_projeto_rs"].round(2)
-    df_vpl_show["VPL produtor (R$)"] = df_vpl_show["vpl_produtor_rs"].round(2)
-
-    st.dataframe(
-        df_vpl_show[["cenário", "r (%)", "Receita anual (R$)", "Economia líquida anual (R$)", "VPL projeto (R$)", "VPL produtor (R$)"]],
-        use_container_width=True
-    )
-
-    fig_v = plot_vpl_bar(df_vpl, title=f"VPL em {int(horizonte_anos)} anos — taxa {taxa_desconto*100:.0f}% a.a.")
-    png_v = fig_to_png_bytes(fig_v)
-    st.image(png_v, caption="Gráfico — VPL (Projeto vs Produtor)", use_container_width=True)
-    st.download_button("Baixar gráfico (PNG) — VPL", data=png_v, file_name="grafico_vpl.png", mime="image/png")
-
-    st.divider()
-
-    st.markdown("### Redução variável por fase fenológica (r por fase) — estimativa de economia bruta")
-    r_por_fase = {"Vegetativa": r_veg, "Reprodutiva": r_rep, "Emborrachamento/Floração": r_flo, "Maturação": r_mat}
-
-    df_fen = pd.DataFrame([
-        {"fase": "Vegetativa", "r": r_veg},
-        {"fase": "Reprodutiva", "r": r_rep},
-        {"fase": "Emborrachamento/Floração", "r": r_flo},
-        {"fase": "Maturação", "r": r_mat},
-    ])
-    df_fen["economia_bruta_rs"] = custo_base_periodo_rs * df_fen["r"]
-    df_fen["r_pct"] = (df_fen["r"] * 100).round(1)
-
-    st.info(
-        f"Fase selecionada no painel: **{fase}** → r = **{r_por_fase.get(fase, 0.0)*100:.1f}%**. "
-        "Use isso como conexão simples entre fenologia e o modelo econômico."
-    )
-
-    df_fen_show = df_fen.copy()
-    df_fen_show["Economia bruta (R$)"] = df_fen_show["economia_bruta_rs"].round(2)
-    st.dataframe(df_fen_show[["fase", "r_pct", "Economia bruta (R$)"]].rename(columns={"r_pct": "r (%)"}), use_container_width=True)
-
-    fig_f = plot_fenologia_bar(df_fen, title=f"Economia bruta estimada por fase — base do período ({periodo})")
-    png_f = fig_to_png_bytes(fig_f)
-    st.image(png_f, caption="Gráfico — Economia por fase fenológica", use_container_width=True)
-    st.download_button("Baixar gráfico (PNG) — Fenologia", data=png_f, file_name="grafico_fenologia.png", mime="image/png")
-
-    st.divider()
-
-    st.markdown("### Evidência exportável (para anexar no TCC)")
-    evidencia = {
-        "timestamp_execucao": _now_iso(),
-        "uc_id": str(uc_id),
-        "periodo": periodo,
-        "usar_tarifa_variavel": bool(usar_tarifa_variavel),
-        "tarifa_fixa_rs_kwh": float(tarifa_kwh_fixa),
-        "tarifa_fp": float(tarifa_fp),
-        "tarifa_ponta": float(tarifa_ponta),
-        "ponta_inicio": int(ponta_inicio),
-        "ponta_fim": int(ponta_fim),
-        "lamina_max_cm": float(lamina_max),
-        "chuva_min_24h_mm": float(chuva_min_mm),
-        "custo_base_periodo_rs": float(custo_base_periodo_rs),
-        "economia_periodo_rs": float(economia_periodo_rs),
-        "economia_mensal_rs_estim": float(economia_mensal_rs),
-        "economia_safra_dias": int(duracao_safra_dias),
-        "economia_safra_rs_estim": float(economia_safra_rs),
-        "pct_captura_value_based": float(pct_captura),
-        "alpha_receita_projeto": float(alpha_receita),
-        "preco_sugerido_rs_mensal": float(preco_sugerido),
-        "investimento_inicial_cliente_rs": float(investimento_inicial_cliente),
-        "roi_mensal_cliente": met_cliente["roi_mensal"],
-        "payback_cliente_meses": met_cliente["payback_meses"],
-        "taxa_desconto_aa": float(taxa_desconto),
-        "horizonte_anos": int(horizonte_anos),
-        "r_fase_vegetativa": float(r_veg),
-        "r_fase_reprodutiva": float(r_rep),
-        "r_fase_emborrachamento_floracao": float(r_flo),
-        "r_fase_maturacao": float(r_mat),
-        # Unit economics
-        "opex_mensal_rs": float(opex_mensal),
-        "cv_por_cliente_rs": float(cv_por_cliente),
-        "overhead_pct": float(overhead_pct),
-        "n_clientes": int(n_clientes),
-        "capex_inicial_projeto_rs": float(capex_inicial_projeto),
-        "mc_por_cliente_rs": float(ue["margem_contribuicao"]),
-        "break_even_clientes": ue["break_even_clientes"],
-        "lucro_mensal_projeto_rs": float(ue["lucro_mensal_projeto"]),
-        "payback_capex_meses": ue["payback_capex_meses"],
-        "app_version": APP_VERSION,
-        "run_id": RUN_ID,
-        "user": login_user,
-        "evaluator": evaluator_name,
-    }
-    st.json(evidencia)
-
-    if st.button("Salvar evidência econômica (CSV)"):
-        _safe_mkdir(LOG_DIR)
-        df_row = pd.DataFrame([evidencia])
-        if not os.path.exists(ECO_LOG_PATH):
-            df_row.to_csv(ECO_LOG_PATH, index=False, encoding="utf-8")
-        else:
-            df_row.to_csv(ECO_LOG_PATH, mode="a", header=False, index=False, encoding="utf-8")
-        st.success(f"Modelo econômico salvo em: {ECO_LOG_PATH}")
-
-    if st.button("Salvar tabela de cenários/VPL/fenologia (CSV)"):
-        ts = _now_iso()
-        df_out = df_vpl[["cenário", "r", "vpl_projeto_rs", "vpl_produtor_rs"]].copy()
-        df_out["timestamp_execucao"] = ts
-        df_out["user"] = login_user
-        df_out["evaluator"] = evaluator_name
-        df_out["uc_id"] = str(uc_id)
-        df_out["periodo"] = periodo
-        df_out["usar_tarifa_variavel"] = int(bool(usar_tarifa_variavel))
-        df_out["tarifa_fixa_rs_kwh"] = float(tarifa_kwh_fixa)
-        df_out["tarifa_fp"] = float(tarifa_fp)
-        df_out["tarifa_ponta"] = float(tarifa_ponta)
-        df_out["ponta_inicio"] = int(ponta_inicio)
-        df_out["ponta_fim"] = int(ponta_fim)
-        df_out["custo_base_periodo_rs"] = float(custo_base_periodo_rs)
-        df_out["alpha_receita"] = float(alpha_receita)
-        df_out["taxa_desconto"] = float(taxa_desconto)
-        df_out["horizonte_anos"] = int(horizonte_anos)
-        df_out["r_fase_veg"] = float(r_veg)
-        df_out["r_fase_rep"] = float(r_rep)
-        df_out["r_fase_flo"] = float(r_flo)
-        df_out["r_fase_mat"] = float(r_mat)
-        df_out["app_version"] = APP_VERSION
-        df_out["run_id"] = RUN_ID
-
-        path = salvar_cenarios_vpl_fenologia(df_out)
-        st.success(f"Tabela salva em: {path}")
-
-    if os.path.exists(ECO_LOG_PATH):
-        st.caption("Histórico (modelo_economico.csv) — últimas 20 linhas:")
-        hist_eco = pd.read_csv(ECO_LOG_PATH)
-        st.dataframe(hist_eco.tail(20), use_container_width=True)
-
-
-# =========================================================
-# TAB 5 — MODELO MATEMÁTICO (equações)
-# =========================================================
-with tabs[5]:
-    st.subheader("Modelo Matemático Formal (equações) — versão para o TCC")
-    st.markdown(
-        r"""
-### Variáveis
-- \(E\): energia consumida (kWh)  
-- \(T\): tarifa (R$/kWh)  
-- \(C\): custo (R$)  
-- \(r\): redução percentual de energia (0–1)  
-- \(\alpha\): participação/receita do projeto sobre a economia bruta (0–1)  
-- \(S\): economia bruta (R$)  
-- \(R\): receita do projeto (R$)  
-- \(S_{liq}\): economia líquida do produtor (R$)  
-- \(i\): taxa de desconto anual  
-- \(n\): horizonte (anos)
-
-### Economia e precificação
-1. Custo do período:
-\[
-C = E \cdot T
-\]
-
-2. Economia bruta:
-\[
-S = C \cdot r
-\]
-
-3. Receita do projeto:
-\[
-R = \alpha \cdot S
-\]
-
-4. Economia líquida do produtor:
-\[
-S_{liq} = S - R = S(1-\alpha)
-\]
-
-### VPL (anuidade constante)
-Para um fluxo anual constante \(CF\):
-\[
-VPL = \sum_{t=1}^{n}\frac{CF}{(1+i)^t}
-\]
-
-No protótipo:
-- \(CF_{proj} = R_{anual}\)
-- \(CF_{prod} = S_{liq,anual}\)
-
-### Unit economics e break-even
-Precificação por valor:
-\[
-P = \min(\max(E_{mensal}\cdot \beta, P_{mín}), P_{máx})
-\]
-
-Margem de contribuição:
-\[
-MC = P - CV - O
-\]
-
-Ponto de equilíbrio:
-\[
-BE = \frac{OPEX}{MC}
-\]
-
-Payback CAPEX:
-\[
-Payback = \frac{CAPEX}{MC \cdot N}
-\]
-        """.strip()
-    )
-
-
-# =========================================================
-# TAB 6 — SEGMENTAÇÃO
-# =========================================================
-with tabs[6]:
-    st.subheader("Segmentação (TCC) — Priorização do Cliente Inicial")
-    st.markdown(
-        """
-**Segmento prioritário (beachhead):**
-- Produtores de arroz irrigado no RS;
-- Médio/grande porte;
-- Bombeamento elétrico + medições (energia/nível/vazão);
-- Preferencialmente com SCADA/sensores já instalados;
-- Alto custo energético.
-        """.strip()
-    )
-
-    st.markdown("### Checklist de aderência do cliente (simulação)")
-    area_ha = st.number_input("Área irrigada (ha)", min_value=0, value=300, step=50)
-    tem_scada = st.checkbox("Possui SCADA / automação?", value=True)
-    tem_medicao_energia = st.checkbox("Possui medição de energia (kWh)?", value=True)
-    custo_mensal = st.number_input("Custo mensal de energia (R$)", min_value=0.0, value=50000.0, step=5000.0)
-
-    score = 0
-    score += 1 if area_ha >= 300 else 0
-    score += 1 if tem_scada else 0
-    score += 1 if tem_medicao_energia else 0
-    score += 1 if custo_mensal >= 50000 else 0
-
-    st.metric("Aderência ao segmento inicial (0–4)", score)
-
-    if score >= 3:
-        st.success("Cliente bem alinhado ao segmento inicial — maior chance de ROI rápido e implantação simples.")
-    else:
-        st.warning("Cliente fora do foco inicial — pode exigir maior customização e reduzir velocidade de escala.")
-
-
-# =========================================================
-# TAB 7 — MVP vs VISÃO FUTURA
-# =========================================================
-with tabs[7]:
-    st.subheader("MVP vs Visão Futura — formato estratégico")
-    st.markdown(
-        """
-### Estratégia (visão em camadas)
-**Nível 1 — MVP (piloto, curto prazo):** provar valor (economia + controle), com transparência e auditabilidade.  
-**Nível 2 — Produto inicial (médio prazo):** padronizar integração e onboarding; ampliar portfólio de recomendações.  
-**Nível 3 — Escala (longo prazo):** IA preditiva/prescritiva + automação e benchmarking regional.
-
-| Dimensão | MVP (piloto) | Próximo estágio (produto) | Visão futura (escala) |
-|---|---|---|---|
-| Objetivo | Evidenciar economia e controle operacional | Replicação e implantação rápida | Otimização e previsões com IA |
-| Tipo de análise | Descritiva/diagnóstica (BI) | Diagnóstico + detecção inteligente | Preditiva/prescritiva (ML) |
-| Recomendações | Regras interpretáveis + logs | Regras + priorização + templates | Modelos + otimização multiobjetivo |
-| Integração | 1–6 UCs (piloto) | Conectores por fornecedor | APIs clima + mobile + benchmark |
-| Evidência | CSVs + RUN_ID | Trilhas de auditoria por cliente | Governança de dados e SLAs |
-        """.strip()
-    )
-
-
-# =========================================================
-# TAB 8 — ESCALA & GARGALOS
-# =========================================================
-with tabs[8]:
-    st.subheader("Escala & Gargalos Operacionais (TCC)")
-    st.markdown(
-        """
-**Gargalos para escalar:**
-- Integração com SCADA heterogêneo (protocolos/dados);
-- Padronização de sensores e qualidade do dado;
-- Conectividade rural e disponibilidade de rede;
-- Treinamento/adoção (mudança cultural);
-- Suporte técnico especializado e SLAs.
-
-**Mitigações planejadas:**
-- Templates de integração por fornecedor;
-- Validação automática de qualidade do dado;
-- Interface simples + tutoriais;
-- Documentação e onboarding padronizado;
-- Priorização de nicho inicial com infraestrutura já instalada.
-
-**Estratégia de execução (sequência sugerida):**
-1) Beachhead com produtores com SCADA já instalado (rápido ROI)  
-2) Padronizar conectores + checklist de qualidade do dado  
-3) Expandir recomendações e relatórios comparativos (benchmark)  
-4) Evoluir para modelos preditivos (ET0, demanda hídrica, detecção anomalias)
-        """.strip()
-    )
-
-
-# =========================================================
-# TAB 9 — QUALIDADE DO DADO (ESCALA)
-# =========================================================
-with tabs[9]:
-    st.subheader("Qualidade do Dado (escala) — validação automática")
-    st.caption("Métricas simples e auditáveis para apoiar a escalabilidade (sensores, SCADA e integridade temporal).")
-
-    dq = data_quality_metrics(df_f)
-    st.json(dq)
-
-    st.markdown("### Interpretação rápida")
-    colA, colB, colC, colD = st.columns(4)
-    colA.metric("Registros", dq["n_registros"])
-    colB.metric("Missing lâmina (%)", f"{dq['missing_lamina_pct']:.1f}%")
-    colC.metric("Missing energia (%)", f"{dq['missing_energia_pct']:.1f}%")
-    colD.metric("dt mediana (h)", f"{dq['dt_mediana_h']:.2f}" if np.isfinite(dq["dt_mediana_h"]) else "—")
-
-    st.markdown("### Evidência (CSV)")
+        st.success("Relatório gerado com sucesso.")
+        with open(csv_path, "rb") as f:
+            st.download_button("Baixar relatório por UC (CSV)", data=f, file_name=os.path.basename(csv_path), mime="text/csv")
+        if os.path.exists(png_rs_path):
+            with open(png_rs_path, "rb") as f:
+                st.download_button("Baixar gráfico economia R$ (PNG)", data=f, file_name=os.path.basename(png_rs_path), mime="image/png")
+        if os.path.exists(png_kwh_path):
+            with open(png_kwh_path, "rb") as f:
+                st.download_button("Baixar gráfico economia kWh (PNG)", data=f, file_name=os.path.basename(png_kwh_path), mime="image/png")
+
+    st.markdown("### Qualidade do dado")
     if st.button("Salvar qualidade do dado (CSV)"):
         path = log_data_quality_event(
             username=login_user,
@@ -2338,67 +2081,46 @@ with tabs[9]:
         )
         st.success(f"Qualidade do dado salva em: {path}")
 
-    if os.path.exists(DQ_LOG_PATH):
-        st.caption("Histórico (data_quality_log.csv) — últimas 20 linhas:")
-        hist_dq = pd.read_csv(DQ_LOG_PATH)
-        st.dataframe(hist_dq.tail(20), use_container_width=True)
+    st.markdown("### Downloads dos logs")
+    for pth, label in [
+        (ACCESS_LOG_PATH, "access_log.csv"),
+        (REC_LOG_PATH, "recommendations_log.csv"),
+        (RES_LOG_PATH, "resultados_piloto.csv"),
+        (ECO_LOG_PATH, "modelo_economico.csv"),
+        (ECO_CENARIOS_LOG_PATH, "cenarios_vpl_fenologia.csv"),
+        (DQ_LOG_PATH, "data_quality_log.csv"),
+    ]:
+        if os.path.exists(pth):
+            with open(pth, "rb") as f:
+                st.download_button(f"Baixar {label}", data=f, file_name=os.path.basename(pth), mime="text/csv")
+
+    with st.expander("Visualizar logs recentes", expanded=False):
+        for pth, label in [
+            (ACCESS_LOG_PATH, "Acessos"),
+            (REC_LOG_PATH, "Recomendações"),
+            (RES_LOG_PATH, "Resultados"),
+            (DQ_LOG_PATH, "Qualidade do dado"),
+        ]:
+            if os.path.exists(pth):
+                st.markdown(f"#### {label}")
+                try:
+                    st.dataframe(pd.read_csv(pth).tail(20), use_container_width=True)
+                except Exception as exc:
+                    st.warning(f"Não foi possível ler {pth}: {exc}")
+
+    st.divider()
+    if st.button("Limpar logs"):
+        removed = clear_logs()
+        if removed:
+            st.success("Logs removidos: " + ", ".join(removed))
+        else:
+            st.info("Nenhum log para remover.")
 
 
-# =========================================================
-# RODAPÉ TÉCNICO / INSTITUCIONAL (TCC)
-# =========================================================
+# Rodapé 
+
 st.divider()
-
-st.markdown(
-    f"""
----
-### 📌 Encerramento do Protótipo Acadêmico
-
-Este sistema demonstra a aplicação integrada de:
-- **Business Intelligence (BI)** → KPIs e visualização operacional  
-- **Data Science** → Tratamento, integração temporal e métricas de eficiência  
-- **Inteligência Artificial Explicável** → Regras interpretáveis para suporte à decisão  
-- **Modelo Econômico Quantitativo** → Cenários, VPL, precificação por valor, unit economics e break-even  
-- **Governança e Auditoria** → Logs com versão e ID de execução  
-
----
-
-### 🔎 Rastreabilidade da Execução
-- **Versão do aplicativo:** `{APP_VERSION}`  
-- **ID da execução (RUN_ID):** `{RUN_ID}`  
-- **Usuário autenticado:** `{login_user}`  
-- **Avaliador:** `{evaluator_name}`  
-- **Timestamp da sessão:** `{datetime.now().isoformat(timespec="seconds")}`  
-
----
-
-### 🧠 Contribuição Acadêmica (Resumo)
-O protótipo valida a viabilidade técnica e econômica de um modelo de
-monitoramento inteligente da irrigação, demonstrando:
-1. Redução simulada de consumo energético  
-2. Apoio ao manejo hídrico baseado em fase fenológica  
-3. Integração entre eficiência operacional e geração de valor  
-4. Estrutura preparada para escalabilidade e modelos preditivos futuros  
-
----
-
-### 🚀 Próximos Passos (Visão Futura)
-- Integração com APIs meteorológicas em tempo real  
-- Modelos preditivos de demanda hídrica (Machine Learning)  
-- Benchmark entre propriedades (comparação de eficiência)  
-- Aplicação mobile para alertas operacionais  
-- Engine de recomendação adaptativa  
-
----
-
-🔐 **Observação:** Este sistema é um protótipo acadêmico desenvolvido para fins de TCC.
-Em ambiente produtivo, recomenda-se:
-- Autenticação OAuth/SSO  
-- Banco de dados dedicado (PostgreSQL/Cloud)  
-- Monitoramento de disponibilidade (SLA)  
-- Pipeline ETL estruturado  
----
-"""
+st.caption(
+    f"Protótipo acadêmico AgroData — BI + Data Science + IA explicável | Versão {APP_VERSION} | RUN_ID {RUN_ID} | "
+    
 )
-
-st.success("Protótipo executado com sucesso — evidências geradas para fins acadêmicos.")
